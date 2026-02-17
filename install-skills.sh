@@ -89,8 +89,8 @@ main() {
 
   # Check if gemini CLI is available
   if ! command -v gemini >/dev/null 2>&1; then
-    echo "Error: 'gemini' CLI not found. Please install it first."
-    exit 1
+    echo "Skipping skill installation (gemini CLI not found)"
+    exit 0
   fi
 
   deploy_skills_from_dir "$skills_dir" "$dry_run" "$scope"
