@@ -74,6 +74,15 @@ deploy_agent() {
   : "${claude_model:=sonnet}"
   : "${claude_description:=Specialist agent}"
 
+  # Model map: translate semantic tiers for cross-platform deployment.
+  # Set MODEL_MAP_FAST / MODEL_MAP_STRONG env vars to override.
+  if [ -n "${MODEL_MAP_FAST:-}" ] || [ -n "${MODEL_MAP_STRONG:-}" ]; then
+    case "$claude_model" in
+      sonnet) claude_model="${MODEL_MAP_FAST:-$claude_model}" ;;
+      opus)   claude_model="${MODEL_MAP_STRONG:-$claude_model}" ;;
+    esac
+  fi
+
   local body
   body="$(fm_body "$agent_file")"
   local frontmatter=""
