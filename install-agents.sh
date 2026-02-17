@@ -9,6 +9,35 @@
 # Usage (as script):
 #   lib/install-agents.sh agents/ [--dry-run] [--clean]
 
+# Slugify a string (lowercase, replace spaces/caps with hyphens)
+slugify() {
+  echo "$1" | sed -e 's/\([a-z0-9]\)\([A-Z]\)/\1-\2/g' \
+                -e 's/[ _]/-/g' \
+                -e 's/--*/-/g' \
+                | tr '[:upper:]' '[:lower:]'
+}
+
+# Map Claude tools to Gemini tools
+map_tools_to_gemini() {
+  local tools_str="$1"
+  local mapped=""
+  IFS=', ' read -r -a tools_array <<< "$tools_str"
+  for tool in "${tools_array[@]}"; do
+    case "$(echo "$tool" | tr '[:upper:]' '[:lower:]')" in
+      read)           mapped="${mapped}${mapped:+, }read_file" ;;
+      write)          mapped="${mapped}${mapped:+, }write_file" ;;
+      edit|replace)   mapped="${mapped}${mapped:+, }replace" ;;
+      grep)           mapped="${mapped}${mapped:+, }grep_search" ;;
+      glob)           mapped="${mapped}${mapped:+, }glob" ;;
+      bash|shell|run) mapped="${mapped}${mapped:+, }run_shell_command" ;;
+      websearch)      mapped="${mapped}${mapped:+, }google_web_search" ;;
+      webfetch)       mapped="${mapped}${mapped:+, }web_fetch" ;;
+      *)              mapped="${mapped}${mapped:+, }$(slugify "$tool")" ;;
+    esac
+  done
+  echo "$mapped"
+}
+
 # Deploy a single agent file to the destination directory.
 deploy_agent() {
   local agent_file="$1"
@@ -30,7 +59,12 @@ deploy_agent() {
   local claude_model claude_description claude_tools
   claude_model="$(fm_value "$agent_file" "claude.model")"
   claude_description="$(fm_value "$agent_file" "claude.description")"
-  claude_tools="$(fm_value "$agent_file" "claude.tools")"
+  
+  # Try fm_list first for tools (in case they are defined as a list), fallback to fm_value
+  claude_tools="$(fm_list "$agent_file" "claude.tools")"
+  if [ -z "$claude_tools" ]; then
+    claude_tools="$(fm_value "$agent_file" "claude.tools")"
+  fi
 
   # Fall back to generic description
   if [ -z "$claude_description" ]; then
@@ -40,22 +74,48 @@ deploy_agent() {
   : "${claude_model:=sonnet}"
   : "${claude_description:=Specialist agent}"
 
-  local out_file="$dst_dir/${claude_name}.md"
   local body
   body="$(fm_body "$agent_file")"
+  local frontmatter=""
+  local out_file=""
 
-  local frontmatter="---
+  # Detect provider and format accordingly
+  if [[ "$dst_dir" == *".gemini"* ]]; then
+    local gemini_name
+    gemini_name="$(slugify "$claude_name")"
+    local gemini_tools
+    gemini_tools="$(map_tools_to_gemini "$claude_tools")"
+    
+    out_file="$dst_dir/${claude_name}.md" # Keep original filename for sync tracking
+    
+    frontmatter="---
+name: ${gemini_name}
+description: ${claude_description}
+kind: local
+model: ${claude_model}
+tools:"
+    IFS=', ' read -r -a t_arr <<< "$gemini_tools"
+    for t in "${t_arr[@]}"; do
+      frontmatter="${frontmatter}
+  - ${t}"
+    done
+    frontmatter="${frontmatter}
+---"
+  else
+    # Default Claude format
+    out_file="$dst_dir/${claude_name}.md"
+    frontmatter="---
 name: ${claude_name}
 description: ${claude_description}
 model: ${claude_model}"
 
-  if [ -n "$claude_tools" ]; then
-    frontmatter="${frontmatter}
+    if [ -n "$claude_tools" ]; then
+      frontmatter="${frontmatter}
 tools: ${claude_tools}"
-  fi
-
-  frontmatter="${frontmatter}
+    fi
+    frontmatter="${frontmatter}
 ---"
+  fi
 
   local content="${frontmatter}
 # synced-from: ${basename_file}
@@ -63,10 +123,10 @@ tools: ${claude_tools}"
 ${body}"
 
   if [ "$dry_run" = "--dry-run" ]; then
-    echo "[dry-run] Would install: ${claude_name}.md"
+    echo "[dry-run] Would install: ${claude_name}.md to $dst_dir"
   else
     printf '%s\n' "$content" > "$out_file"
-    echo "Installed: ${claude_name}.md"
+    echo "Installed: ${claude_name}.md to $dst_dir"
   fi
   return 0
 }
@@ -126,9 +186,16 @@ clean_agents() {
 # CLI entry point
 main() {
   local src_dir=""
-  local dst_dir="${HOME}/.claude/agents"
   local dry_run=""
   local clean=false
+  
+  # Supported provider directories
+  local provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents")
+  
+  # Use AGENTS_DST if provided, overriding defaults
+  if [ -n "${AGENTS_DST:-}" ]; then
+    provider_dirs=("$AGENTS_DST")
+  fi
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -168,13 +235,14 @@ main() {
     fi
   fi
 
-  if $clean; then
-    clean_agents "$src_dir" "$dst_dir" "$dry_run"
-  fi
-
-  deploy_agents_from_dir "$src_dir" "$dst_dir" "$dry_run"
+  for dst_dir in "${provider_dirs[@]}"; do
+    echo "Targeting provider directory: $dst_dir"
+    if $clean; then
+      clean_agents "$src_dir" "$dst_dir" "$dry_run"
+    fi
+    deploy_agents_from_dir "$src_dir" "$dst_dir" "$dry_run"
+  done
 }
-
 # Run main if executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   main "$@"
