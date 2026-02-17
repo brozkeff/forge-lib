@@ -190,7 +190,7 @@ main() {
   local clean=false
   
   # Supported provider directories
-  local provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents")
+  local provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents" ".gemini/agents")
   
   # Use AGENTS_DST if provided, overriding defaults
   if [ -n "${AGENTS_DST:-}" ]; then
