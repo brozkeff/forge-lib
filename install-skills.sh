@@ -139,16 +139,42 @@ install_skill() {
 
     local skill_name
     skill_name="$(yaml_top_value "$skill_yaml" "name")"
+    
+    # Sidecar override for scope
+    local sidecar_file="defaults.yaml"
+    if [ -f "config.yaml" ]; then
+      sidecar_file="config.yaml"
+    fi
+
+    if [ -f "$sidecar_file" ]; then
+      local sidecar_scope
+      sidecar_scope=$(awk -v skill="$skill_name" '
+        $0 ~ "^" skill ":" { in_target=1; next }
+        in_target && /^[^ ]/ { in_target=0 }
+        in_target && $0 ~ "^  scope:[ ]*" {
+          sub("^[ ]*scope:[ ]*", "", $0)
+          print
+          exit
+        }
+      ' "$sidecar_file")
+      if [ -n "$sidecar_scope" ]; then
+        scope="$sidecar_scope"
+      fi
+    fi
+
     local configured_scope
     configured_scope="$(yaml_provider_value "$skill_yaml" "$provider" "scope")"
     if [ -n "$configured_scope" ]; then
-      scope="$configured_scope"
+      # If not overridden by sidecar, use configured scope
+      if [ -z "${sidecar_scope:-}" ]; then
+        scope="$configured_scope"
+      fi
     fi
 
     if [ "$dry_run" = "--dry-run" ]; then
       echo "[dry-run] Would install Gemini skill: $skill_name (scope: $scope)"
     else
-      echo "Installing Gemini skill: $skill_name..."
+      echo "Installing Gemini skill: $skill_name (scope: $scope)..."
       gemini skills install "$skill_dir" --scope "$scope" --consent
     fi
   else
@@ -180,7 +206,7 @@ main() {
   local provider="gemini"
   local dry_run=""
   local clean=false
-  local scope="user"
+  local scope="workspace"
   local dst_dir=""
   local agents_dir="agents"
   local include_agent_wrappers=false
