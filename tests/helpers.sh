@@ -14,7 +14,23 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-source "$LIB_DIR/frontmatter.sh"
+# Inline frontmatter parsing (previously sourced from frontmatter.sh)
+fm_value() {
+  local file="$1" key="$2"
+  awk -v key="$key" '
+    /^---$/ { if (++fm==2) exit; next }
+    fm==1 && $0 ~ "^" key ":[ ]*" {
+      val=$0; sub("^" key ":[ ]*", "", val)
+      gsub(/^["'"'"']|["'"'"']$/, "", val)
+      if (val != "") { print val; exit }
+    }
+  ' "$file"
+}
+
+fm_body() {
+  local file="$1"
+  awk '/^---$/ { if (++fm==2) { body=1; next } next } body { print }' "$file"
+}
 
 # Counters
 PASS=0

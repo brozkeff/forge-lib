@@ -52,10 +52,10 @@ plugin_json_valid() {
   fi
 }
 
-# --- Test 3: lib/frontmatter.sh exists (submodule initialized) ---
+# --- Test 3: lib/ submodule initialized (Cargo.toml or Makefile present) ---
 
 lib_submodule_initialized() {
-  assert_file_exists "lib/frontmatter.sh exists" "$MODULE_ROOT/lib/frontmatter.sh"
+  assert_file_exists "lib/Makefile exists" "$MODULE_ROOT/lib/Makefile"
 }
 
 # --- Run all ---
