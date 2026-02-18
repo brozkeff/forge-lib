@@ -160,6 +160,9 @@ deploy_agent() {
   : "${tier_strong:=opus}"
 
   # Agent-specific overrides from sidecar
+  local sidecar_file="defaults.yaml"
+  [ -f "config.yaml" ] && sidecar_file="config.yaml"
+
   local sidecar_model
   sidecar_model=$(sidecar_value "$claude_name" "model")
   [ -n "$sidecar_model" ] && claude_model="$sidecar_model"
@@ -186,7 +189,7 @@ deploy_agent() {
     }
     in_tools && $0 ~ "^  [^ ]" { in_tools=0; in_target=0 }
     END { if (count) printf "\n" }
-  ' "defaults.yaml")
+  ' "$sidecar_file")
 
   if [ -n "$sidecar_tools" ]; then
     claude_tools="$sidecar_tools"
@@ -200,10 +203,11 @@ deploy_agent() {
 
   # Model map overrides from environment
   if [ -n "${MODEL_MAP_FAST:-}" ] || [ -n "${MODEL_MAP_STRONG:-}" ]; then
-    case "$claude_model" in
-      sonnet|$tier_fast) claude_model="${MODEL_MAP_FAST:-$claude_model}" ;;
-      opus|$tier_strong)   claude_model="${MODEL_MAP_STRONG:-$claude_model}" ;;
-    esac
+    if [ "$claude_model" = "sonnet" ] || [ "$claude_model" = "$tier_fast" ]; then
+      claude_model="${MODEL_MAP_FAST:-$claude_model}"
+    elif [ "$claude_model" = "opus" ] || [ "$claude_model" = "$tier_strong" ]; then
+      claude_model="${MODEL_MAP_STRONG:-$claude_model}"
+    fi
   fi
 
   # Whitelist check
