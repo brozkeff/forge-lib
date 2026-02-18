@@ -88,6 +88,84 @@ deploy_agent() {
   local frontmatter=""
   local out_file=""
 
+  # Append sidecar tools and model overrides from config.yaml or defaults.yaml
+  local sidecar_file="defaults.yaml"
+  if [ -f "config.yaml" ]; then
+    sidecar_file="config.yaml"
+  fi
+
+  # Model Tiers
+  local tier_fast tier_strong
+  tier_fast=$(awk '/^models:/ { in_models=1; next } in_models && /^  fast:/ { sub("^  fast:[ ]*", "", $0); print; next } in_models && /^[^ ]/ { in_models=0 }' "$sidecar_file")
+  tier_strong=$(awk '/^models:/ { in_models=1; next } in_models && /^  strong:/ { sub("^  strong:[ ]*", "", $0); print; next } in_models && /^[^ ]/ { in_models=0 }' "$sidecar_file")
+  : "${tier_fast:=sonnet}"
+  : "${tier_strong:=opus}"
+
+  if [ -f "$sidecar_file" ]; then
+    local sidecar_tools
+    sidecar_tools=$(awk -v agent="$claude_name" '
+      $0 ~ "^" agent ":" { in_target=1; next }
+      in_target && /^[^ ]/ { in_target=0 }
+      in_target && $0 ~ "^  tools:" {
+        val = $0
+        sub("^[ ]*tools:[ ]*", "", val)
+        if (val != "") {
+          print val
+          in_target=0
+        } else {
+          in_tools=1
+        }
+        next
+      }
+      in_tools && $0 ~ "^    - " {
+        sub("^[ ]*-[ ]*", "")
+        printf "%s%s", (count++ ? ", " : ""), $0
+        next
+      }
+      in_tools && $0 ~ "^  [^ ]" { in_tools=0; in_target=0 }
+      END { if (count) printf "\n" }
+    ' "$sidecar_file")
+
+    if [ -n "$sidecar_tools" ]; then
+      claude_tools="$sidecar_tools"
+    fi
+
+    local sidecar_model
+    sidecar_model=$(awk -v agent="$claude_name" '
+      $0 ~ "^" agent ":" { in_target=1; next }
+      in_target && /^[^ ]/ { in_target=0 }
+      in_target && $0 ~ "^  model:[ ]*" {
+        sub("^[ ]*model:[ ]*", "", $0)
+        print
+        exit
+      }
+    ' "$sidecar_file")
+
+    if [ -n "$sidecar_model" ]; then
+      claude_model="$sidecar_model"
+    fi
+  fi
+
+  # Resolve semantic tiers
+  case "$claude_model" in
+    fast)   claude_model="$tier_fast" ;;
+    strong) claude_model="$tier_strong" ;;
+  esac
+
+  # Model map: translate semantic tiers for cross-platform deployment.
+  # Set MODEL_MAP_FAST / MODEL_MAP_STRONG env vars to override.
+  if [ -n "${MODEL_MAP_FAST:-}" ] || [ -n "${MODEL_MAP_STRONG:-}" ]; then
+    case "$claude_model" in
+      sonnet|$tier_fast) claude_model="${MODEL_MAP_FAST:-$claude_model}" ;;
+      opus|$tier_strong)   claude_model="${MODEL_MAP_STRONG:-$claude_model}" ;;
+    esac
+  fi
+
+  local body
+  body="$(fm_body "$agent_file")"
+  local frontmatter=""
+  local out_file=""
+
   # Detect provider and format accordingly
   if [[ "$dst_dir" == *".gemini"* ]]; then
     local gemini_name
@@ -197,21 +275,18 @@ main() {
   local src_dir=""
   local dry_run=""
   local clean=false
+  local scope="all"
   
-  # Supported provider directories
-  local provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents" ".gemini/agents")
-  
-  # Use AGENTS_DST if provided, overriding defaults
-  if [ -n "${AGENTS_DST:-}" ]; then
-    provider_dirs=("$AGENTS_DST")
-  fi
-
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run) dry_run="--dry-run" ;;
       --clean)   clean=true ;;
+      --scope)
+        scope="$2"
+        shift
+        ;;
       -h|--help)
-        echo "Usage: install-agents.sh <src_dir> [--dry-run] [--clean]"
+        echo "Usage: install-agents.sh <src_dir> [--dry-run] [--clean] [--scope user|workspace|all]"
         exit 0
         ;;
       *)
@@ -228,8 +303,31 @@ main() {
 
   if [ -z "$src_dir" ]; then
     echo "Error: Source directory required."
-    echo "Usage: install-agents.sh <src_dir> [--dry-run] [--clean]"
+    echo "Usage: install-agents.sh <src_dir> [--dry-run] [--clean] [--scope user|workspace|all]"
     exit 1
+  fi
+
+  # Supported provider directories
+  local provider_dirs=()
+  case "$scope" in
+    user)
+      provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents")
+      ;;
+    workspace)
+      provider_dirs=(".gemini/agents")
+      ;;
+    all)
+      provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents" ".gemini/agents")
+      ;;
+    *)
+      echo "Error: Invalid scope '$scope'. Use user, workspace, or all."
+      exit 1
+      ;;
+  esac
+  
+  # Use AGENTS_DST if provided, overriding defaults
+  if [ -n "${AGENTS_DST:-}" ]; then
+    provider_dirs=("$AGENTS_DST")
   fi
 
   # Source dependencies if not already available
