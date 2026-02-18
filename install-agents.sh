@@ -122,6 +122,12 @@ deploy_agent() {
     return 1
   fi
 
+  # Validate agent name (prevent path traversal)
+  if ! echo "$claude_name" | grep -qE '^[A-Za-z][A-Za-z0-9]*$'; then
+    echo "Error: Invalid agent name '$claude_name' in $agent_file (must be PascalCase alphanumeric)" >&2
+    return 1
+  fi
+
   local claude_model claude_description claude_tools
   claude_model="$(fm_value "$agent_file" "claude.model")"
   claude_description="$(fm_value "$agent_file" "claude.description")"
@@ -272,6 +278,12 @@ tools: ${claude_tools}"
 # synced-from: ${basename_file}
 
 ${body}"
+
+  # Check for user-created agent (no synced-from header)
+  if [ -f "$out_file" ] && ! grep -q "^# synced-from:" "$out_file" 2>/dev/null; then
+    echo "Warning: Skipping $out_file — user-created agent (no synced-from header). Use --clean to force." >&2
+    return 0
+  fi
 
   if [ "$dry_run" = "--dry-run" ]; then
     echo "[dry-run] Would install: ${claude_name}.md to $dst_dir"
