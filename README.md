@@ -1,19 +1,22 @@
 # forge-lib
 
-Shared shell utilities for Forge modules. Provides frontmatter parsing, lazy Rust compilation, agent deployment, and markdown processing.
+Shared Rust library and CLI binaries for Forge modules. Provides frontmatter parsing, agent deployment, skill installation, and markdown processing.
+
+## Build
+
+```bash
+make build    # cargo build --release + symlinks to bin/
+make test     # cargo test (222 tests)
+make lint     # cargo fmt --check + clippy
+make check    # verify bin/ has all binaries
+make clean    # cargo clean + rm bin/
+```
+
+Binaries are symlinked into `bin/` for submodule consumers. The `bin/` directory is gitignored and lazily populated on first `make build`.
 
 ## Usage
 
-### Inside forge-core
-
-Already available via `FORGE_LIB` env var (set by dispatch):
-
-```bash
-source "$FORGE_LIB/frontmatter.sh"
-value="$(fm_value file.md "claude.name")"
-```
-
-### Standalone module
+### As a submodule
 
 Add forge-lib as a git submodule at `lib/`:
 
@@ -22,67 +25,50 @@ cd your-module/
 git submodule add https://github.com/N4M3Z/forge-lib.git lib
 ```
 
-Users cloning your module should use `--recurse-submodules`:
+Reference binaries at `lib/bin/`:
 
-```bash
-git clone --recurse-submodules https://github.com/N4M3Z/your-module.git
+```makefile
+LIB_DIR = lib
+INSTALL_AGENTS := $(LIB_DIR)/bin/install-agents
+
+# Auto-build when binaries are missing
+$(INSTALL_AGENTS):
+	@$(MAKE) -C $(LIB_DIR) build
+
+install-agents: $(INSTALL_AGENTS)
+	@$(INSTALL_AGENTS) agents --scope workspace
 ```
 
-The `lib/` directory IS forge-lib — no nesting. Then in your scripts:
+### Library crate
 
-```bash
-MODULE_ROOT="$(builtin cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FORGE_LIB="${FORGE_LIB:-$MODULE_ROOT/lib}"
-
-if [ ! -d "$FORGE_LIB" ]; then
-  echo "forge-lib not found. Run: git clone <url> $MODULE_ROOT/lib" >&2
-  exit 1
-fi
-
-source "$FORGE_LIB/frontmatter.sh"
+```toml
+[dependencies]
+forge-lib = { path = "lib" }
 ```
 
-## Utilities
+Five modules: `parse` (frontmatter), `strip` (markdown processing), `sidecar` (YAML config), `deploy` (agent deployment), `skill` (skill installation).
 
-| File | Functions | Purpose |
-|------|-----------|---------|
-| `frontmatter.sh` | `fm_value`, `fm_body` | Parse YAML frontmatter from markdown files |
-| `ensure-built.sh` | `ensure_built` | Lazy Rust compilation (cargo build on first use) |
-| `install-agents.sh` | `deploy_agent`, `deploy_agents_from_dir` | Deploy agent markdown files to `~/.claude/agents/` |
-| `strip-front.sh` | `strip_front` | Strip YAML frontmatter and H1 heading from markdown |
+## CLI Binaries
+
+| Binary | Purpose |
+|--------|---------|
+| `strip-front` | Strip YAML frontmatter and H1 heading from markdown |
+| `install-agents` | Deploy agent markdown files to Claude/Gemini/Codex directories |
+| `install-skills` | Install skills with provider-specific routing and wrapper generation |
 
 ## Updating forge-lib
 
-All Forge modules include forge-lib as a git submodule at `lib/`. When forge-lib is updated, each module must pull the new version:
+All Forge modules include forge-lib as a git submodule at `lib/`. When forge-lib is updated:
 
 ```bash
-# Inside a module directory
-git submodule update --remote lib
+cd your-module/
+git -C lib pull
+make -C lib build
 git add lib
 git commit -m "chore: update forge-lib submodule"
-git push
-```
-
-Inside forge-core, update Core/lib and all modules at once:
-
-```bash
-# Update forge-core's copy
-git submodule update --remote Core/lib
-git add Core/lib
-# Update each module's copy
-for m in Modules/*/; do
-  git -C "$m" submodule update --remote lib 2>/dev/null && \
-  git -C "$m" add lib && \
-  git -C "$m" diff --cached --quiet || \
-  git -C "$m" commit -m "chore: update forge-lib submodule"
-done
-git add Modules/
-git commit -m "chore: update forge-lib across all modules"
 ```
 
 ## Dependencies
 
-- bash 4+ (macOS ships 3.2 but BSD awk is sufficient)
-- awk (BSD or GNU)
-- cargo (only if using `ensure-built.sh`)
-- git (for submodule management)
+- Rust (cargo) for building
+- git for submodule management
