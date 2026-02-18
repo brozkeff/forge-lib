@@ -9,6 +9,8 @@
 # Usage (as script):
 #   lib/install-agents.sh agents/ [--dry-run] [--clean]
 
+set -euo pipefail
+
 # Slugify a string (lowercase, replace spaces/caps with hyphens)
 slugify() {
   echo "$1" | sed -e 's/\([a-z0-9]\)\([A-Z]\)/\1-\2/g' \
@@ -274,7 +276,10 @@ ${body}"
   if [ "$dry_run" = "--dry-run" ]; then
     echo "[dry-run] Would install: ${claude_name}.md to $dst_dir"
   else
-    printf '%s\n' "$content" > "$out_file"
+    if ! printf '%s\n' "$content" > "$out_file"; then
+      echo "Error: Failed to write $out_file" >&2
+      return 1
+    fi
     echo "Installed: ${claude_name}.md to $dst_dir"
   fi
   return 0
@@ -294,6 +299,9 @@ deploy_agents_from_dir() {
     [ -f "$agent_file" ] || continue
     if deploy_agent "$agent_file" "$dst_dir" "$dry_run"; then
       count=$((count + 1))
+    else
+      echo "Error: Agent deployment failed for $agent_file to $dst_dir" >&2
+      return 1
     fi
   done
 
@@ -373,13 +381,13 @@ main() {
   local provider_dirs=()
   case "$scope" in
     user)
-      provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents")
+      provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents" "${HOME}/.codex/agents")
       ;;
     workspace)
-      provider_dirs=(".gemini/agents")
+      provider_dirs=(".claude/agents" ".gemini/agents" ".codex/agents")
       ;;
     all)
-      provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents" ".gemini/agents")
+      provider_dirs=("${HOME}/.claude/agents" "${HOME}/.gemini/agents" "${HOME}/.codex/agents" ".claude/agents" ".gemini/agents" ".codex/agents")
       ;;
     *)
       echo "Error: Invalid scope '$scope'. Use user, workspace, or all."
