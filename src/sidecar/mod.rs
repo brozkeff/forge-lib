@@ -40,7 +40,8 @@ impl SidecarConfig {
     pub fn provider_tiers(&self, provider: &str) -> ModelTiers {
         let global = self.global_tiers();
 
-        let provider_section = navigate(&self.raw, &["providers", provider, "models"]);
+        let provider_section = navigate(&self.raw, &["providers", provider, "models"])
+            .or_else(|| navigate(&self.raw, &[provider]));
         if let Some(section) = provider_section {
             ModelTiers {
                 fast: yaml_string(&section, "fast").unwrap_or(global.fast),
@@ -52,7 +53,8 @@ impl SidecarConfig {
     }
 
     pub fn is_model_whitelisted(&self, provider: &str, model: &str) -> bool {
-        let whitelist = navigate(&self.raw, &["providers", provider, "whitelist"]);
+        let whitelist = navigate(&self.raw, &["providers", provider, "whitelist"])
+            .or_else(|| navigate(&self.raw, &[provider, "models"]));
         match whitelist {
             Some(Value::Sequence(ref seq)) if seq.is_empty() => false,
             Some(Value::Sequence(seq)) => seq.iter().any(|v| match v {
@@ -64,7 +66,8 @@ impl SidecarConfig {
     }
 
     pub fn agent_value(&self, agent: &str, key: &str) -> Option<String> {
-        let val = navigate(&self.raw, &["agents", agent, key])?;
+        let val = navigate(&self.raw, &["agents", agent, key])
+            .or_else(|| navigate(&self.raw, &[agent, key]))?;
         normalize_value(val)
     }
 
@@ -73,8 +76,9 @@ impl SidecarConfig {
         normalize_value(val)
     }
 
-    fn global_tiers(&self) -> ModelTiers {
-        let shared = navigate(&self.raw, &["shared", "models"]);
+    pub fn global_tiers(&self) -> ModelTiers {
+        let shared =
+            navigate(&self.raw, &["shared", "models"]).or_else(|| navigate(&self.raw, &["models"]));
         match shared {
             Some(section) => ModelTiers {
                 fast: yaml_string(&section, "fast").unwrap_or_else(|| "sonnet".to_string()),
@@ -85,11 +89,13 @@ impl SidecarConfig {
     }
 }
 
-pub fn resolve_model(model: &str, tiers: &ModelTiers) -> String {
-    match model {
-        "fast" => tiers.fast.clone(),
-        "strong" => tiers.strong.clone(),
-        other => other.to_string(),
+pub fn resolve_model(model: &str, global: &ModelTiers, provider: &ModelTiers) -> String {
+    if model == "fast" || model == global.fast {
+        provider.fast.clone()
+    } else if model == "strong" || model == global.strong {
+        provider.strong.clone()
+    } else {
+        model.to_string()
     }
 }
 

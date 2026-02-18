@@ -18,27 +18,62 @@ fn default_tiers() {
 // --- resolve_model ---
 
 #[test]
-fn resolve_fast() {
-    let tiers = ModelTiers::default();
-    assert_eq!(resolve_model("fast", &tiers), "sonnet");
+fn resolve_fast_alias() {
+    let global = ModelTiers::default();
+    assert_eq!(resolve_model("fast", &global, &global), "sonnet");
 }
 
 #[test]
-fn resolve_strong() {
-    let tiers = ModelTiers::default();
-    assert_eq!(resolve_model("strong", &tiers), "opus");
+fn resolve_strong_alias() {
+    let global = ModelTiers::default();
+    assert_eq!(resolve_model("strong", &global, &global), "opus");
+}
+
+#[test]
+fn resolve_fast_default_to_provider() {
+    let global = ModelTiers::default();
+    let gemini = ModelTiers {
+        fast: "gemini-2.0-flash".into(),
+        strong: "gemini-2.5-pro".into(),
+    };
+    assert_eq!(
+        resolve_model("sonnet", &global, &gemini),
+        "gemini-2.0-flash"
+    );
+    assert_eq!(resolve_model("fast", &global, &gemini), "gemini-2.0-flash");
+}
+
+#[test]
+fn resolve_strong_default_to_provider() {
+    let global = ModelTiers::default();
+    let gemini = ModelTiers {
+        fast: "gemini-2.0-flash".into(),
+        strong: "gemini-2.5-pro".into(),
+    };
+    assert_eq!(resolve_model("opus", &global, &gemini), "gemini-2.5-pro");
+    assert_eq!(resolve_model("strong", &global, &gemini), "gemini-2.5-pro");
+}
+
+#[test]
+fn resolve_same_provider_noop() {
+    let global = ModelTiers::default();
+    assert_eq!(resolve_model("sonnet", &global, &global), "sonnet");
+    assert_eq!(resolve_model("opus", &global, &global), "opus");
 }
 
 #[test]
 fn resolve_passthrough() {
-    let tiers = ModelTiers::default();
-    assert_eq!(resolve_model("gemini-2.5-pro", &tiers), "gemini-2.5-pro");
+    let global = ModelTiers::default();
+    assert_eq!(
+        resolve_model("gemini-2.5-pro", &global, &global),
+        "gemini-2.5-pro"
+    );
 }
 
 #[test]
 fn resolve_empty_string() {
-    let tiers = ModelTiers::default();
-    assert_eq!(resolve_model("", &tiers), "");
+    let global = ModelTiers::default();
+    assert_eq!(resolve_model("", &global, &global), "");
 }
 
 // --- SidecarConfig::load ---
@@ -255,6 +290,87 @@ fn skill_value_missing_returns_none() {
     assert_eq!(config.skill_value("NonExistent", "scope"), None);
 }
 
+// --- flat YAML structure (forge-council style) ---
+
+#[test]
+fn flat_global_tiers() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "models:\n  fast: haiku\n  strong: sonnet\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let tiers = config.global_tiers();
+    assert_eq!(tiers.fast, "haiku");
+    assert_eq!(tiers.strong, "sonnet");
+}
+
+#[test]
+fn flat_provider_tiers() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        concat!(
+            "models:\n  fast: sonnet\n  strong: opus\n",
+            "gemini:\n  fast: gemini-2.0-flash\n  strong: gemini-2.5-pro\n",
+        ),
+    );
+    let config = SidecarConfig::load(dir.path());
+    let tiers = config.provider_tiers("gemini");
+    assert_eq!(tiers.fast, "gemini-2.0-flash");
+    assert_eq!(tiers.strong, "gemini-2.5-pro");
+}
+
+#[test]
+fn flat_agent_value() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "Developer:\n  model: fast\n  tools: Read, Write, Bash\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.agent_value("Developer", "model"),
+        Some("fast".into())
+    );
+    assert_eq!(
+        config.agent_value("Developer", "tools"),
+        Some("Read, Write, Bash".into())
+    );
+}
+
+#[test]
+fn flat_whitelist() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "gemini:\n  models:\n    - gemini-2.0-flash\n    - gemini-2.5-pro\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert!(config.is_model_whitelisted("gemini", "gemini-2.0-flash"));
+    assert!(!config.is_model_whitelisted("gemini", "sonnet"));
+}
+
+#[test]
+fn nested_takes_priority_over_flat() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        concat!(
+            "shared:\n  models:\n    fast: nested-fast\n",
+            "models:\n  fast: flat-fast\n",
+        ),
+    );
+    let config = SidecarConfig::load(dir.path());
+    let tiers = config.global_tiers();
+    assert_eq!(tiers.fast, "nested-fast");
+}
+
 // --- merge_values ---
 
 #[test]
@@ -319,8 +435,8 @@ mod proptests {
 
         #[test]
         fn resolve_model_never_panics(model in "\\PC{0,100}") {
-            let tiers = ModelTiers::default();
-            let _ = resolve_model(&model, &tiers);
+            let global = ModelTiers::default();
+            let _ = resolve_model(&model, &global, &global);
         }
     }
 }

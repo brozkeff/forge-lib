@@ -104,8 +104,9 @@ pub fn extract_agent_meta(
         description = override_desc;
     }
 
-    let tiers = config.provider_tiers(provider.as_str());
-    model = resolve_model(&model, &tiers);
+    let global = config.global_tiers();
+    let provider_tiers = config.provider_tiers(provider.as_str());
+    model = resolve_model(&model, &global, &provider_tiers);
 
     let display_name = provider.format_name(&name);
 
