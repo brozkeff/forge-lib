@@ -149,7 +149,7 @@ install_skill() {
       echo "[dry-run] Would install Gemini skill: $skill_name (scope: $scope)"
     else
       echo "Installing Gemini skill: $skill_name..."
-      gemini skills install "$skill_dir" --scope "$scope" --yes
+      gemini skills install "$skill_dir" --scope "$scope" --consent
     fi
   else
     copy_skill_to_destination "$skill_dir" "$dst_dir" "$dry_run"
@@ -186,47 +186,58 @@ main() {
   local include_agent_wrappers=false
   local keep_temp=false
 
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --provider)
-        shift
-        provider="$1"
+  local key=""
+  for arg in "$@"; do
+    # Skip empty arguments
+    [[ -z "$arg" ]] && continue
+
+    if [[ -n "$key" ]]; then
+      case "$key" in
+        --provider)   provider="$arg" ;;
+        --scope)      scope="$arg" ;;
+        --dst)        dst_dir="$arg" ;;
+        --agents-dir) agents_dir="$arg" ;;
+      esac
+      key=""
+      continue
+    fi
+
+    case "$arg" in
+      --provider|--scope|--dst|--agents-dir)
+        key="$arg"
         ;;
       --dry-run) dry_run="--dry-run" ;;
-      --clean) clean=true ;;
-      --scope)
-        shift
-        scope="$1"
-        ;;
-      --dst)
-        shift
-        dst_dir="$1"
-        ;;
-      --agents-dir)
-        shift
-        agents_dir="$1"
-        ;;
-      --include-agent-wrappers)
-        include_agent_wrappers=true
-        ;;
-      --keep-temp)
-        keep_temp=true
-        ;;
+      --clean)   clean=true ;;
+      --include-agent-wrappers) include_agent_wrappers=true ;;
+      --keep-temp) keep_temp=true ;;
       -h|--help)
         echo "Usage: install-skills.sh <skills_dir> --provider claude|gemini|codex [--dry-run] [--clean] [--scope user|workspace] [--dst path] [--agents-dir path] [--include-agent-wrappers] [--keep-temp]"
         exit 0
         ;;
+      -*)
+        echo "Error: Unexpected option: $arg"
+        exit 1
+        ;;
       *)
-        if [ -d "$1" ]; then
-          skills_dir="$1"
+        if [[ -z "$skills_dir" ]]; then
+          if [[ -d "$arg" ]]; then
+            skills_dir="$arg"
+          else
+            echo "Error: Invalid skills directory: $arg"
+            exit 1
+          fi
         else
-          echo "Error: Invalid directory: $1"
+          echo "Error: Unexpected argument: $arg"
           exit 1
         fi
         ;;
     esac
-    shift
   done
+
+  if [[ -n "$key" ]]; then
+    echo "Error: Option $key requires an argument"
+    exit 1
+  fi
 
   if [ -z "$skills_dir" ]; then
     echo "Error: skills_dir is required"
@@ -272,7 +283,11 @@ main() {
       exit 1
     fi
 
-    bash "$SCRIPT_DIR/generate-agent-skills.sh" "$agents_dir" "$stage_generated" "$dry_run"
+    if [ -n "$dry_run" ]; then
+      bash "$SCRIPT_DIR/generate-agent-skills.sh" "$agents_dir" "$stage_generated" "$dry_run"
+    else
+      bash "$SCRIPT_DIR/generate-agent-skills.sh" "$agents_dir" "$stage_generated"
+    fi
   fi
 
   if [ "$clean" = true ] && [ "$provider" != "gemini" ] && [ -d "$dst_dir" ]; then
