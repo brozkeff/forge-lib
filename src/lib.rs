@@ -3,3 +3,4 @@ pub mod parse;
 pub mod sidecar;
 pub mod skill;
 pub mod strip;
+pub mod validate;
