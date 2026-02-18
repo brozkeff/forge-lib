@@ -10,7 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/helpers.sh"
 
 AGENTS_DIR="$MODULE_ROOT/agents"
-INSTALL_SCRIPT="$LIB_DIR/install-agents.sh"
+INSTALL_BIN="$LIB_DIR/bin/install-agents"
+
+# Ensure binary is built
+if [ ! -x "$INSTALL_BIN" ]; then
+  command make -C "$LIB_DIR" build > /dev/null 2>&1
+fi
 
 echo "=== Deploy Parity ==="
 
@@ -30,10 +35,10 @@ trap cleanup EXIT
 
 # Deploy to all three provider dirs from the module root
 (
-  cd "$MODULE_ROOT"
-  AGENTS_DST="$CLAUDE_DST" bash "$INSTALL_SCRIPT" "$AGENTS_DIR" > /dev/null 2>&1
-  AGENTS_DST="$GEMINI_DST" bash "$INSTALL_SCRIPT" "$AGENTS_DIR" > /dev/null 2>&1
-  AGENTS_DST="$CODEX_DST" bash "$INSTALL_SCRIPT" "$AGENTS_DIR" > /dev/null 2>&1
+  builtin cd "$MODULE_ROOT"
+  "$INSTALL_BIN" "$AGENTS_DIR" --dst "$CLAUDE_DST" > /dev/null 2>&1
+  "$INSTALL_BIN" "$AGENTS_DIR" --dst "$GEMINI_DST" > /dev/null 2>&1
+  "$INSTALL_BIN" "$AGENTS_DIR" --dst "$CODEX_DST" > /dev/null 2>&1
 )
 
 # --- Helper ---
