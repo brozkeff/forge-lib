@@ -38,6 +38,70 @@ map_tools_to_gemini() {
   echo "$mapped"
 }
 
+# Get a value from the sidecar file (config.yaml or defaults.yaml)
+# Usage: sidecar_value "key" ["subkey"]
+sidecar_value() {
+  local sidecar_file="defaults.yaml"
+  [ -f "config.yaml" ] && sidecar_file="config.yaml"
+  [ -f "$sidecar_file" ] || return 1
+
+  local key="$1"
+  local subkey="${2:-}"
+  
+  if [ -z "$subkey" ]; then
+    # Top-level key
+    awk -v key="$key" '
+      $0 ~ "^" key ":[ ]*" {
+        val = $0
+        sub("^" key ":[ ]*", "", val)
+        gsub(/^["'\'']|["'\'']$/, "", val)
+        if (val != "") { print val; exit }
+      }
+    ' "$sidecar_file"
+  else
+    # One level nested
+    awk -v key="$key" -v subkey="$subkey" '
+      $0 ~ "^" key ":[ ]*$" { in_section=1; next }
+      in_section && $0 ~ "^  " subkey ":[ ]*" {
+        val = $0
+        sub("^[ ]*" subkey ":[ ]*", "", val)
+        gsub(/^["'\'']|["'\'']$/, "", val)
+        if (val != "") { print val; exit }
+      }
+      in_section && /^[^ ]/ { in_section=0 }
+    ' "$sidecar_file"
+  fi
+}
+
+# Check if a model is whitelisted for a provider in the sidecar
+# Usage: is_model_whitelisted "gemini" "gemini-1.5-flash"
+is_model_whitelisted() {
+  local provider="$1"
+  local model="$2"
+  local sidecar_file="defaults.yaml"
+  [ -f "config.yaml" ] && sidecar_file="config.yaml"
+  [ -f "$sidecar_file" ] || return 0 # Allow if no sidecar
+
+  # Look for "provider: models: [list]" or list items
+  local found
+  found=$(awk -v provider="$provider" -v model="$model" '
+    $0 ~ "^" provider ":[ ]*$" { in_provider=1; next }
+    in_provider && $0 ~ "^  models:[ ]*$" { in_models=1; next }
+    in_models && $0 ~ "^    - " {
+      val = $0
+      sub("^[ ]*-[ ]*", "", val)
+      if (val == model) { print "yes"; exit }
+    }
+    in_models && /^  [^ ]/ { in_models=0 }
+    in_provider && /^[^ ]/ { in_provider=0 }
+  ' "$sidecar_file")
+
+  if [ "$found" = "yes" ]; then
+    return 0
+  fi
+  return 1
+}
+
 # Deploy a single agent file to the destination directory.
 deploy_agent() {
   local agent_file="$1"
@@ -74,76 +138,58 @@ deploy_agent() {
   : "${claude_model:=sonnet}"
   : "${claude_description:=Specialist agent}"
 
-  # Model map: translate semantic tiers for cross-platform deployment.
-  # Set MODEL_MAP_FAST / MODEL_MAP_STRONG env vars to override.
-  if [ -n "${MODEL_MAP_FAST:-}" ] || [ -n "${MODEL_MAP_STRONG:-}" ]; then
-    case "$claude_model" in
-      sonnet) claude_model="${MODEL_MAP_FAST:-$claude_model}" ;;
-      opus)   claude_model="${MODEL_MAP_STRONG:-$claude_model}" ;;
-    esac
+  # Provider detection
+  local provider="claude"
+  if [[ "$dst_dir" == *".gemini"* ]]; then
+    provider="gemini"
   fi
 
-  local body
-  body="$(fm_body "$agent_file")"
-  local frontmatter=""
-  local out_file=""
-
-  # Append sidecar tools and model overrides from config.yaml or defaults.yaml
-  local sidecar_file="defaults.yaml"
-  if [ -f "config.yaml" ]; then
-    sidecar_file="config.yaml"
-  fi
-
-  # Model Tiers
+  # Resolve models from sidecar
   local tier_fast tier_strong
-  tier_fast=$(awk '/^models:/ { in_models=1; next } in_models && /^  fast:/ { sub("^  fast:[ ]*", "", $0); print; next } in_models && /^[^ ]/ { in_models=0 }' "$sidecar_file")
-  tier_strong=$(awk '/^models:/ { in_models=1; next } in_models && /^  strong:/ { sub("^  strong:[ ]*", "", $0); print; next } in_models && /^[^ ]/ { in_models=0 }' "$sidecar_file")
+  tier_fast=$(sidecar_value "models" "fast")
+  tier_strong=$(sidecar_value "models" "strong")
+  
+  # Provider-specific tiers
+  local p_fast p_strong
+  p_fast=$(sidecar_value "$provider" "fast")
+  p_strong=$(sidecar_value "$provider" "strong")
+  [ -n "$p_fast" ] && tier_fast="$p_fast"
+  [ -n "$p_strong" ] && tier_strong="$p_strong"
+
   : "${tier_fast:=sonnet}"
   : "${tier_strong:=opus}"
 
-  if [ -f "$sidecar_file" ]; then
-    local sidecar_tools
-    sidecar_tools=$(awk -v agent="$claude_name" '
-      $0 ~ "^" agent ":" { in_target=1; next }
-      in_target && /^[^ ]/ { in_target=0 }
-      in_target && $0 ~ "^  tools:" {
-        val = $0
-        sub("^[ ]*tools:[ ]*", "", val)
-        if (val != "") {
-          print val
-          in_target=0
-        } else {
-          in_tools=1
-        }
-        next
-      }
-      in_tools && $0 ~ "^    - " {
-        sub("^[ ]*-[ ]*", "")
-        printf "%s%s", (count++ ? ", " : ""), $0
-        next
-      }
-      in_tools && $0 ~ "^  [^ ]" { in_tools=0; in_target=0 }
-      END { if (count) printf "\n" }
-    ' "$sidecar_file")
+  # Agent-specific overrides from sidecar
+  local sidecar_model
+  sidecar_model=$(sidecar_value "$claude_name" "model")
+  [ -n "$sidecar_model" ] && claude_model="$sidecar_model"
 
-    if [ -n "$sidecar_tools" ]; then
-      claude_tools="$sidecar_tools"
-    fi
-
-    local sidecar_model
-    sidecar_model=$(awk -v agent="$claude_name" '
-      $0 ~ "^" agent ":" { in_target=1; next }
-      in_target && /^[^ ]/ { in_target=0 }
-      in_target && $0 ~ "^  model:[ ]*" {
-        sub("^[ ]*model:[ ]*", "", $0)
-        print
-        exit
+  local sidecar_tools
+  sidecar_tools=$(awk -v agent="$claude_name" '
+    $0 ~ "^" agent ":" { in_target=1; next }
+    in_target && /^[^ ]/ { in_target=0 }
+    in_target && $0 ~ "^  tools:" {
+      val = $0
+      sub("^[ ]*tools:[ ]*", "", val)
+      if (val != "") {
+        print val
+        in_target=0
+      } else {
+        in_tools=1
       }
-    ' "$sidecar_file")
+      next
+    }
+    in_tools && $0 ~ "^    - " {
+      sub("^[ ]*-[ ]*", "")
+      printf "%s%s", (count++ ? ", " : ""), $0
+      next
+    }
+    in_tools && $0 ~ "^  [^ ]" { in_tools=0; in_target=0 }
+    END { if (count) printf "\n" }
+  ' "defaults.yaml")
 
-    if [ -n "$sidecar_model" ]; then
-      claude_model="$sidecar_model"
-    fi
+  if [ -n "$sidecar_tools" ]; then
+    claude_tools="$sidecar_tools"
   fi
 
   # Resolve semantic tiers
@@ -152,13 +198,18 @@ deploy_agent() {
     strong) claude_model="$tier_strong" ;;
   esac
 
-  # Model map: translate semantic tiers for cross-platform deployment.
-  # Set MODEL_MAP_FAST / MODEL_MAP_STRONG env vars to override.
+  # Model map overrides from environment
   if [ -n "${MODEL_MAP_FAST:-}" ] || [ -n "${MODEL_MAP_STRONG:-}" ]; then
     case "$claude_model" in
       sonnet|$tier_fast) claude_model="${MODEL_MAP_FAST:-$claude_model}" ;;
       opus|$tier_strong)   claude_model="${MODEL_MAP_STRONG:-$claude_model}" ;;
     esac
+  fi
+
+  # Whitelist check
+  local model_allowed=true
+  if ! is_model_whitelisted "$provider" "$claude_model"; then
+    model_allowed=false
   fi
 
   local body
@@ -167,7 +218,7 @@ deploy_agent() {
   local out_file=""
 
   # Detect provider and format accordingly
-  if [[ "$dst_dir" == *".gemini"* ]]; then
+  if [ "$provider" = "gemini" ]; then
     local gemini_name
     gemini_name="$(slugify "$claude_name")"
     local gemini_tools
@@ -178,8 +229,12 @@ deploy_agent() {
     frontmatter="---
 name: ${gemini_name}
 description: ${claude_description}
-kind: local
-model: ${claude_model}
+kind: local"
+    if [ "$model_allowed" = true ]; then
+      frontmatter="${frontmatter}
+model: ${claude_model}"
+    fi
+    frontmatter="${frontmatter}
 tools:"
     IFS=', ' read -r -a t_arr <<< "$gemini_tools"
     for t in "${t_arr[@]}"; do
@@ -193,8 +248,11 @@ tools:"
     out_file="$dst_dir/${claude_name}.md"
     frontmatter="---
 name: ${claude_name}
-description: ${claude_description}
+description: ${claude_description}"
+    if [ "$model_allowed" = true ]; then
+      frontmatter="${frontmatter}
 model: ${claude_model}"
+    fi
 
     if [ -n "$claude_tools" ]; then
       frontmatter="${frontmatter}
