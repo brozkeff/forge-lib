@@ -522,11 +522,12 @@ fn check_synced_from(s: &mut Suite, provider_dirs: &[(&std::path::PathBuf, Provi
                 .to_string_lossy()
                 .to_string();
             let content = fs::read_to_string(entry.path()).unwrap_or_default();
-            let has_synced = content.lines().any(|l| l.starts_with("# synced-from:"));
-            s.checks.push(if has_synced {
-                Check::pass(format!("{label}/{name} has synced-from"))
+            let has_source = parse::fm_value(&content, "source").is_some()
+                || content.lines().any(|l| l.starts_with("# synced-from:"));
+            s.checks.push(if has_source {
+                Check::pass(format!("{label}/{name} has source"))
             } else {
-                Check::fail(format!("{label}/{name} missing synced-from header"))
+                Check::fail(format!("{label}/{name} missing source field"))
             });
         }
     }
@@ -659,7 +660,7 @@ pub fn validate_deploy_parity(root: &Path) -> Suite {
 
     for (dst, provider) in &provider_dirs {
         let _ = fs::create_dir_all(dst);
-        let _ = deploy_agents_from_dir(&agents_dir, dst, *provider, &config, false);
+        let _ = deploy_agents_from_dir(&agents_dir, dst, *provider, &config, false, "");
     }
 
     let claude_count = count_md_files(&claude_dst);
@@ -687,6 +688,7 @@ pub fn validate_deploy_parity(root: &Path) -> Suite {
 
 fn extract_deployed_body(content: &str) -> &str {
     let body = parse::fm_body(content);
+    // Legacy format: strip "# synced-from:" line from body
     let body = body
         .strip_prefix("# synced-from:")
         .map_or(body, |rest| rest.find('\n').map_or("", |i| &rest[i + 1..]));

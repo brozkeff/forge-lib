@@ -13,6 +13,7 @@ pub struct AgentMeta {
     pub description: String,
     pub tools: Option<String>,
     pub source_file: String,
+    pub source: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -60,9 +61,8 @@ pub fn format_agent_output(
         }
     }
 
+    let _ = writeln!(out, "source: {}", meta.source);
     out.push_str("---\n");
-    let _ = writeln!(out, "# synced-from: {}", meta.source_file);
-    out.push('\n');
     out.push_str(body);
     if !body.ends_with('\n') {
         out.push('\n');
@@ -75,40 +75,45 @@ pub fn extract_agent_meta(
     filename: &str,
     provider: Provider,
     config: &SidecarConfig,
+    source_prefix: &str,
 ) -> Option<AgentMeta> {
     if filename.starts_with("_Template") || filename.starts_with("Template") {
         return None;
     }
 
-    let name = parse::fm_value(content, "claude.name")?;
+    let name = parse::fm_value(content, "name")
+        .or_else(|| parse::fm_value(content, "claude.name"))?;
     if name.is_empty() {
         return None;
     }
 
-    let mut model = parse::fm_value(content, "claude.model").unwrap_or_else(|| "sonnet".into());
+    // Config is primary source for model/tools; frontmatter is legacy fallback
+    let mut model = config
+        .agent_value(&name, "model")
+        .or_else(|| parse::fm_value(content, "claude.model"))
+        .unwrap_or_else(|| "sonnet".into());
 
-    let mut description = parse::fm_value(content, "claude.description")
-        .or_else(|| parse::fm_value(content, "description"))
+    let description = parse::fm_value(content, "description")
+        .or_else(|| parse::fm_value(content, "claude.description"))
+        .or_else(|| config.agent_value(&name, "description"))
         .unwrap_or_else(|| "Specialist agent".into());
 
-    let mut tools = parse::fm_list(content, "claude.tools")
+    let tools = config
+        .agent_value(&name, "tools")
+        .or_else(|| parse::fm_list(content, "claude.tools"))
         .or_else(|| parse::fm_value(content, "claude.tools"));
-
-    if let Some(override_model) = config.agent_value(&name, "model") {
-        model = override_model;
-    }
-    if let Some(override_tools) = config.agent_value(&name, "tools") {
-        tools = Some(override_tools);
-    }
-    if let Some(override_desc) = config.agent_value(&name, "description") {
-        description = override_desc;
-    }
 
     let global = config.global_tiers();
     let provider_tiers = config.provider_tiers(provider.as_str());
     model = resolve_model(&model, &global, &provider_tiers);
 
     let display_name = provider.format_name(&name);
+
+    let source = if source_prefix.is_empty() {
+        filename.to_string()
+    } else {
+        format!("{source_prefix}/{filename}")
+    };
 
     Some(AgentMeta {
         name,
@@ -117,6 +122,7 @@ pub fn extract_agent_meta(
         description,
         tools,
         source_file: filename.to_string(),
+        source,
     })
 }
 
@@ -127,12 +133,13 @@ pub fn deploy_agent(
     provider: Provider,
     config: &SidecarConfig,
     dry_run: bool,
+    source_prefix: &str,
 ) -> Result<DeployResult, String> {
     if filename.starts_with("_Template") || filename.starts_with("Template") {
         return Ok(DeployResult::SkippedTemplate);
     }
 
-    let Some(meta) = extract_agent_meta(content, filename, provider, config) else {
+    let Some(meta) = extract_agent_meta(content, filename, provider, config, source_prefix) else {
         return Ok(DeployResult::SkippedNoName);
     };
 
@@ -172,6 +179,7 @@ pub fn deploy_agents_from_dir(
     provider: Provider,
     config: &SidecarConfig,
     dry_run: bool,
+    source_prefix: &str,
 ) -> Result<Vec<(String, DeployResult)>, String> {
     if !src_dir.is_dir() {
         return Ok(Vec::new());
@@ -192,7 +200,8 @@ pub fn deploy_agents_from_dir(
         let filename = entry.file_name().to_string_lossy().to_string();
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        let result = deploy_agent(&content, &filename, dst_dir, provider, config, dry_run)?;
+        let result =
+            deploy_agent(&content, &filename, dst_dir, provider, config, dry_run, source_prefix)?;
         results.push((filename, result));
     }
 
@@ -215,7 +224,9 @@ pub fn clean_agents(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> Result<Vec
             let content = std::fs::read_to_string(&path)
                 .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
 
-            let name = match parse::fm_value(&content, "claude.name") {
+            let name = match parse::fm_value(&content, "name")
+                .or_else(|| parse::fm_value(&content, "claude.name"))
+            {
                 Some(n) if !n.is_empty() => n,
                 _ => continue,
             };

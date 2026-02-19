@@ -40,7 +40,12 @@ impl SidecarConfig {
     pub fn provider_tiers(&self, provider: &str) -> ModelTiers {
         let global = self.global_tiers();
 
+        // Legacy: providers -> provider -> models (Mapping with fast/strong)
+        // New:    providers -> provider (fast/strong as direct keys, models is a whitelist Sequence)
+        // Flat:   provider (root-level key)
         let provider_section = navigate(&self.raw, &["providers", provider, "models"])
+            .filter(Value::is_mapping)
+            .or_else(|| navigate(&self.raw, &["providers", provider]))
             .or_else(|| navigate(&self.raw, &[provider]));
         if let Some(section) = provider_section {
             ModelTiers {
@@ -54,6 +59,10 @@ impl SidecarConfig {
 
     pub fn is_model_whitelisted(&self, provider: &str, model: &str) -> bool {
         let whitelist = navigate(&self.raw, &["providers", provider, "whitelist"])
+            .or_else(|| {
+                navigate(&self.raw, &["providers", provider, "models"])
+                    .filter(Value::is_sequence)
+            })
             .or_else(|| navigate(&self.raw, &[provider, "models"]));
         match whitelist {
             Some(Value::Sequence(ref seq)) if seq.is_empty() => false,
@@ -72,7 +81,8 @@ impl SidecarConfig {
     }
 
     pub fn skill_value(&self, skill_name: &str, key: &str) -> Option<String> {
-        let val = navigate(&self.raw, &[skill_name, key])?;
+        let val = navigate(&self.raw, &["skills", skill_name, key])
+            .or_else(|| navigate(&self.raw, &[skill_name, key]))?;
         normalize_value(val)
     }
 

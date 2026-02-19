@@ -268,7 +268,7 @@ pub fn format_agent_skill_yaml(
     out.push_str("generation:\n");
     out.push_str("  source: generated-from-agent\n");
     let _ = writeln!(out, "  agent: {agent_name}");
-    let _ = writeln!(out, "  synced-from: {source_filename}");
+    let _ = writeln!(out, "  source: {source_filename}");
     out
 }
 

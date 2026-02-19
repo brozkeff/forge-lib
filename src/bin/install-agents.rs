@@ -82,12 +82,27 @@ fn parse_args() -> Result<Args, ExitCode> {
     })
 }
 
+fn read_module_name() -> Option<String> {
+    let content = std::fs::read_to_string("module.yaml").ok()?;
+    forge_lib::parse::fm_value(&content, "name")
+        .or_else(|| {
+            content.lines().find_map(|l| {
+                l.strip_prefix("name:")
+                    .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
+            })
+        })
+}
+
 fn run(args: &Args) -> ExitCode {
     let src_path = Path::new(&args.src_dir);
     if !src_path.is_dir() {
         eprintln!("Error: not a directory: {}", args.src_dir);
         return ExitCode::from(1);
     }
+
+    let source_prefix = read_module_name()
+        .map(|name| format!("{name}/{}", args.src_dir))
+        .unwrap_or_default();
 
     let config = SidecarConfig::load(Path::new("."));
 
@@ -126,7 +141,9 @@ fn run(args: &Args) -> ExitCode {
             }
         }
 
-        if let Err(code) = deploy_to_dir(src_path, dst_dir, provider, &config, args.dry_run) {
+        if let Err(code) =
+            deploy_to_dir(src_path, dst_dir, provider, &config, args.dry_run, &source_prefix)
+        {
             return code;
         }
     }
@@ -140,8 +157,10 @@ fn deploy_to_dir(
     provider: Provider,
     config: &SidecarConfig,
     dry_run: bool,
+    source_prefix: &str,
 ) -> Result<(), ExitCode> {
-    let results = deploy::deploy_agents_from_dir(src_path, dst_dir, provider, config, dry_run)
+    let results =
+        deploy::deploy_agents_from_dir(src_path, dst_dir, provider, config, dry_run, source_prefix)
         .map_err(|e| {
             eprintln!("Error: {e}");
             ExitCode::from(1)
@@ -162,7 +181,7 @@ fn deploy_to_dir(
             }
             DeployResult::SkippedUserOwned => {
                 eprintln!(
-                    "Warning: Skipping {name}.md — user-created agent (no synced-from header)"
+                    "Warning: Skipping {name}.md — user-created agent (no source field)"
                 );
             }
             DeployResult::SkippedTemplate | DeployResult::SkippedNoName => {}

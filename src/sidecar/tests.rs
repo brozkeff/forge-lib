@@ -269,19 +269,37 @@ fn agent_missing_returns_none() {
 // --- skill_value ---
 
 #[test]
-fn skill_scope_from_root_level() {
+fn skill_scope_from_skills_section() {
     let dir = TempDir::new().unwrap();
     write_yaml(
         dir.path(),
         "defaults.yaml",
-        "DeveloperCouncil:\n  scope: workspace\nCouncil:\n  scope: user\n",
+        "skills:\n    DeveloperCouncil:\n        scope: workspace\n    DebateCouncil:\n        scope: user\n",
     );
     let config = SidecarConfig::load(dir.path());
     assert_eq!(
         config.skill_value("DeveloperCouncil", "scope"),
         Some("workspace".into())
     );
-    assert_eq!(config.skill_value("Council", "scope"), Some("user".into()));
+    assert_eq!(
+        config.skill_value("DebateCouncil", "scope"),
+        Some("user".into())
+    );
+}
+
+#[test]
+fn skill_scope_from_root_level_fallback() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "DeveloperCouncil:\n  scope: workspace\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.skill_value("DeveloperCouncil", "scope"),
+        Some("workspace".into())
+    );
 }
 
 #[test]
