@@ -203,6 +203,23 @@ fn map_tools_claude_identity() {
     );
 }
 
+// ─── Provider: agent_extension ───
+
+#[test]
+fn agent_extension_codex_toml() {
+    assert_eq!(Provider::Codex.agent_extension(), "toml");
+}
+
+#[test]
+fn agent_extension_claude_md() {
+    assert_eq!(Provider::Claude.agent_extension(), "md");
+}
+
+#[test]
+fn agent_extension_gemini_md() {
+    assert_eq!(Provider::Gemini.agent_extension(), "md");
+}
+
 // ─── Provider: as_str ───
 
 #[test]
@@ -275,6 +292,7 @@ fn make_meta() -> AgentMeta {
         tools: Some("Read, Bash".into()),
         source_file: "SecurityArchitect.md".into(),
         source: "SecurityArchitect.md".into(),
+        reasoning_effort: None,
     }
 }
 
@@ -282,20 +300,21 @@ fn make_meta() -> AgentMeta {
 fn format_claude_with_model_and_tools() {
     let meta = make_meta();
     let output = format_agent_output(&meta, "Body text.\n", Provider::Claude, true);
-    assert!(output.contains("name: SecurityArchitect\n"));
-    assert!(output.contains("model: sonnet\n"));
-    assert!(output.contains("tools: Read, Bash\n"));
-    assert!(output.contains("source: SecurityArchitect.md"));
-    assert!(!output.contains("# synced-from:"));
-    assert!(output.contains("Body text.\n"));
+    assert!(output.primary.contains("name: SecurityArchitect\n"));
+    assert!(output.primary.contains("model: sonnet\n"));
+    assert!(output.primary.contains("tools: Read, Bash\n"));
+    assert!(output.primary.contains("source: SecurityArchitect.md"));
+    assert!(!output.primary.contains("# synced-from:"));
+    assert!(output.primary.contains("Body text.\n"));
+    assert!(output.prompt_file.is_none());
 }
 
 #[test]
 fn format_claude_without_model() {
     let meta = make_meta();
     let output = format_agent_output(&meta, "Body.\n", Provider::Claude, false);
-    assert!(!output.contains("model:"));
-    assert!(output.contains("name: SecurityArchitect"));
+    assert!(!output.primary.contains("model:"));
+    assert!(output.primary.contains("name: SecurityArchitect"));
 }
 
 #[test]
@@ -303,7 +322,7 @@ fn format_claude_without_tools() {
     let mut meta = make_meta();
     meta.tools = None;
     let output = format_agent_output(&meta, "Body.\n", Provider::Claude, true);
-    assert!(!output.contains("tools:"));
+    assert!(!output.primary.contains("tools:"));
 }
 
 #[test]
@@ -316,13 +335,15 @@ fn format_gemini_with_mapped_tools() {
         tools: Some("Read, Bash".into()),
         source_file: "SecurityArchitect.md".into(),
         source: "SecurityArchitect.md".into(),
+        reasoning_effort: None,
     };
     let output = format_agent_output(&meta, "Body.\n", Provider::Gemini, true);
-    assert!(output.contains("name: security-architect\n"));
-    assert!(output.contains("kind: local\n"));
-    assert!(output.contains("model: gemini-2.0-flash\n"));
-    assert!(output.contains("  - read_file\n"));
-    assert!(output.contains("  - run_shell_command\n"));
+    assert!(output.primary.contains("name: security-architect\n"));
+    assert!(output.primary.contains("kind: local\n"));
+    assert!(output.primary.contains("model: gemini-2.0-flash\n"));
+    assert!(output.primary.contains("  - read_file\n"));
+    assert!(output.primary.contains("  - run_shell_command\n"));
+    assert!(output.prompt_file.is_none());
 }
 
 #[test]
@@ -335,23 +356,56 @@ fn format_gemini_without_model() {
         tools: Some("Read".into()),
         source_file: "Dev.md".into(),
         source: "Dev.md".into(),
+        reasoning_effort: None,
     };
     let output = format_agent_output(&meta, "Body.\n", Provider::Gemini, false);
-    assert!(!output.contains("model:"));
-    assert!(output.contains("kind: local"));
+    assert!(!output.primary.contains("model:"));
+    assert!(output.primary.contains("kind: local"));
 }
 
 #[test]
-fn format_codex_same_as_claude() {
+fn format_codex_toml_output() {
+    let mut meta = make_meta();
+    meta.reasoning_effort = Some("low".into());
+    let output = format_agent_output(&meta, "Body.\n", Provider::Codex, true);
+    assert!(output.primary.contains("# source: SecurityArchitect.md"));
+    assert!(output
+        .primary
+        .contains("description = \"System architect\""));
+    assert!(output.primary.contains("model = \"sonnet\""));
+    assert!(output.primary.contains("model_reasoning_effort = \"low\""));
+    assert!(output
+        .primary
+        .contains("model_instructions_file = \"agents/SecurityArchitect.prompt.md\""));
+    assert!(!output.primary.contains("---"));
+    let (filename, content) = output.prompt_file.unwrap();
+    assert_eq!(filename, "SecurityArchitect.prompt.md");
+    assert!(content.contains("Body."));
+}
+
+#[test]
+fn format_codex_no_reasoning_effort() {
     let meta = make_meta();
     let output = format_agent_output(&meta, "Body.\n", Provider::Codex, true);
-    assert!(output.contains("name: SecurityArchitect\n"));
-    assert!(output.contains("tools: Read, Bash\n"));
-    assert!(!output.contains("kind:"));
+    assert!(!output.primary.contains("model_reasoning_effort"));
+    assert!(output
+        .primary
+        .contains("description = \"System architect\""));
+    assert!(output.prompt_file.is_some());
 }
 
 #[test]
-fn format_source_always_in_frontmatter() {
+fn format_codex_without_model() {
+    let meta = make_meta();
+    let output = format_agent_output(&meta, "Body.\n", Provider::Codex, false);
+    assert!(!output.primary.contains("model ="));
+    assert!(output
+        .primary
+        .contains("description = \"System architect\""));
+}
+
+#[test]
+fn format_source_always_present() {
     let meta = make_meta();
     let claude = format_agent_output(&meta, "B.\n", Provider::Claude, true);
     let gemini = format_agent_output(
@@ -363,11 +417,12 @@ fn format_source_always_in_frontmatter() {
         Provider::Gemini,
         true,
     );
-    assert!(claude.contains("source: SecurityArchitect.md"));
-    assert!(gemini.contains("source: SecurityArchitect.md"));
-    // source: should be in frontmatter (before closing ---), not in body
-    assert!(!claude.contains("# synced-from:"));
-    assert!(!gemini.contains("# synced-from:"));
+    let codex = format_agent_output(&meta, "B.\n", Provider::Codex, true);
+    assert!(claude.primary.contains("source: SecurityArchitect.md"));
+    assert!(gemini.primary.contains("source: SecurityArchitect.md"));
+    assert!(codex.primary.contains("# source: SecurityArchitect.md"));
+    assert!(!claude.primary.contains("# synced-from:"));
+    assert!(!gemini.primary.contains("# synced-from:"));
 }
 
 #[test]
@@ -375,7 +430,17 @@ fn format_body_preserved() {
     let meta = make_meta();
     let body = "## Role\n\nYou review architecture.\n\n## Constraints\n\nBe thorough.\n";
     let output = format_agent_output(&meta, body, Provider::Claude, true);
-    assert!(output.contains(body));
+    assert!(output.primary.contains(body));
+}
+
+#[test]
+fn format_codex_body_in_prompt_file() {
+    let meta = make_meta();
+    let body = "## Role\n\nYou review architecture.\n\n## Constraints\n\nBe thorough.\n";
+    let output = format_agent_output(&meta, body, Provider::Codex, true);
+    assert!(!output.primary.contains("## Role"));
+    let (_, prompt_content) = output.prompt_file.unwrap();
+    assert!(prompt_content.contains(body));
 }
 
 // ─── extract_agent_meta ───
@@ -712,7 +777,7 @@ fn clean_removes_synced() {
         "# synced-from: Developer.md\nDeployed content.\n",
     )
     .unwrap();
-    let removed = clean_agents(src.path(), dst.path(), false).unwrap();
+    let removed = clean_agents(src.path(), dst.path(), Provider::Claude, false).unwrap();
     assert_eq!(removed, vec!["Developer"]);
     assert!(!dst.path().join("Developer.md").exists());
 }
@@ -727,7 +792,7 @@ fn clean_protects_user_created() {
     )
     .unwrap();
     fs::write(dst.path().join("Developer.md"), "User-created agent.\n").unwrap();
-    let removed = clean_agents(src.path(), dst.path(), false).unwrap();
+    let removed = clean_agents(src.path(), dst.path(), Provider::Claude, false).unwrap();
     assert!(removed.is_empty());
     assert!(dst.path().join("Developer.md").exists());
 }
@@ -746,7 +811,7 @@ fn clean_dry_run() {
         "# synced-from: Developer.md\nContent.\n",
     )
     .unwrap();
-    let removed = clean_agents(src.path(), dst.path(), true).unwrap();
+    let removed = clean_agents(src.path(), dst.path(), Provider::Claude, true).unwrap();
     assert_eq!(removed, vec!["Developer"]);
     assert!(dst.path().join("Developer.md").exists());
 }
@@ -754,7 +819,13 @@ fn clean_dry_run() {
 #[test]
 fn clean_missing_dst() {
     let src = TempDir::new().unwrap();
-    let removed = clean_agents(src.path(), Path::new("/nonexistent"), false).unwrap();
+    let removed = clean_agents(
+        src.path(),
+        Path::new("/nonexistent"),
+        Provider::Claude,
+        false,
+    )
+    .unwrap();
     assert!(removed.is_empty());
 }
 
@@ -902,9 +973,138 @@ fn clean_new_format() {
         "# synced-from: Developer.md\nDeployed content.\n",
     )
     .unwrap();
-    let removed = clean_agents(src.path(), dst.path(), false).unwrap();
+    let removed = clean_agents(src.path(), dst.path(), Provider::Claude, false).unwrap();
     assert_eq!(removed, vec!["Developer"]);
     assert!(!dst.path().join("Developer.md").exists());
+}
+
+// ─── Codex deploy ───
+
+#[test]
+fn deploy_codex_writes_toml_and_prompt() {
+    let dir = TempDir::new().unwrap();
+    let config = SidecarConfig::default();
+    let content = "---\nname: Developer\ndescription: Senior dev\nversion: 0.3.0\n---\nYou are a developer.\n";
+    let result = deploy_agent(
+        content,
+        "Developer.md",
+        dir.path(),
+        Provider::Codex,
+        &config,
+        false,
+        "",
+    );
+    assert!(matches!(result, Ok(DeployResult::Deployed)));
+    assert!(dir.path().join("Developer.toml").exists());
+    assert!(dir.path().join("Developer.prompt.md").exists());
+    let toml = fs::read_to_string(dir.path().join("Developer.toml")).unwrap();
+    assert!(toml.contains("description = \"Senior dev\""));
+    assert!(toml.contains("model_instructions_file = \"agents/Developer.prompt.md\""));
+    let prompt = fs::read_to_string(dir.path().join("Developer.prompt.md")).unwrap();
+    assert!(prompt.contains("You are a developer."));
+}
+
+#[test]
+fn deploy_codex_overwrite_with_source() {
+    let dir = TempDir::new().unwrap();
+    let config = SidecarConfig::default();
+    fs::write(
+        dir.path().join("Developer.toml"),
+        "# source: Developer.md\ndescription = \"Old\"\n",
+    )
+    .unwrap();
+    let content =
+        "---\nname: Developer\ndescription: Updated dev\nversion: 0.3.0\n---\nNew body.\n";
+    let result = deploy_agent(
+        content,
+        "Developer.md",
+        dir.path(),
+        Provider::Codex,
+        &config,
+        false,
+        "",
+    );
+    assert!(matches!(result, Ok(DeployResult::Deployed)));
+    let toml = fs::read_to_string(dir.path().join("Developer.toml")).unwrap();
+    assert!(toml.contains("description = \"Updated dev\""));
+}
+
+#[test]
+fn deploy_codex_skips_user_owned_toml() {
+    let dir = TempDir::new().unwrap();
+    let config = SidecarConfig::default();
+    fs::write(
+        dir.path().join("Developer.toml"),
+        "description = \"My custom agent\"\n",
+    )
+    .unwrap();
+    let content = "---\nname: Developer\ndescription: Dev\nversion: 0.3.0\n---\nBody.\n";
+    let result = deploy_agent(
+        content,
+        "Developer.md",
+        dir.path(),
+        Provider::Codex,
+        &config,
+        false,
+        "",
+    );
+    assert!(matches!(result, Ok(DeployResult::SkippedUserOwned)));
+}
+
+#[test]
+fn clean_codex_removes_toml_and_prompt() {
+    let src = TempDir::new().unwrap();
+    let dst = TempDir::new().unwrap();
+    fs::write(
+        src.path().join("Developer.md"),
+        "---\nname: Developer\n---\nBody.\n",
+    )
+    .unwrap();
+    fs::write(
+        dst.path().join("Developer.toml"),
+        "# source: Developer.md\ndescription = \"Dev\"\n",
+    )
+    .unwrap();
+    fs::write(dst.path().join("Developer.prompt.md"), "Body.\n").unwrap();
+    let removed = clean_agents(src.path(), dst.path(), Provider::Codex, false).unwrap();
+    assert_eq!(removed, vec!["Developer"]);
+    assert!(!dst.path().join("Developer.toml").exists());
+    assert!(!dst.path().join("Developer.prompt.md").exists());
+}
+
+// ─── reasoning_effort extraction ───
+
+#[test]
+fn extract_reasoning_effort_from_agent_config() {
+    let config = config_with_agents(concat!(
+        "agents:\n  Developer:\n    model: fast\n    tools: Read\n    reasoning_effort: high\n",
+        "providers:\n  codex:\n    fast: gpt-5.1-codex-mini\n    strong: o4-mini\n",
+        "    reasoning_effort:\n      fast: low\n      strong: medium\n",
+    ));
+    let content = "---\nname: Developer\ndescription: Dev\nversion: 0.3.0\n---\nBody.\n";
+    let meta = extract_agent_meta(content, "Developer.md", Provider::Codex, &config, "").unwrap();
+    assert_eq!(meta.reasoning_effort, Some("high".into()));
+}
+
+#[test]
+fn extract_reasoning_effort_tier_fallback() {
+    let config = config_with_agents(concat!(
+        "agents:\n  Developer:\n    model: fast\n    tools: Read\n",
+        "providers:\n  codex:\n    fast: gpt-5.1-codex-mini\n    strong: o4-mini\n",
+        "    reasoning_effort:\n      fast: low\n      strong: medium\n",
+    ));
+    let content = "---\nname: Developer\ndescription: Dev\nversion: 0.3.0\n---\nBody.\n";
+    let meta = extract_agent_meta(content, "Developer.md", Provider::Codex, &config, "").unwrap();
+    assert_eq!(meta.reasoning_effort, Some("low".into()));
+    assert_eq!(meta.model, "gpt-5.1-codex-mini");
+}
+
+#[test]
+fn extract_reasoning_effort_none_without_config() {
+    let config = SidecarConfig::default();
+    let content = "---\nname: Developer\ndescription: Dev\nversion: 0.3.0\n---\nBody.\n";
+    let meta = extract_agent_meta(content, "Developer.md", Provider::Claude, &config, "").unwrap();
+    assert_eq!(meta.reasoning_effort, None);
 }
 
 // ─── source prefix ───
@@ -998,4 +1198,195 @@ fn scope_all() {
 #[test]
 fn scope_invalid() {
     assert!(scope_dirs("bogus", Path::new("/tmp")).is_err());
+}
+
+// ─── toml_escape ───
+
+#[test]
+fn toml_escape_quotes_and_backslashes() {
+    assert_eq!(toml_escape(r#"say "hello""#), r#"say \"hello\""#);
+    assert_eq!(toml_escape(r"path\to\file"), r"path\\to\\file");
+    assert_eq!(
+        toml_escape(r#"mixed "quote" and \back"#),
+        r#"mixed \"quote\" and \\back"#
+    );
+}
+
+#[test]
+fn toml_escape_no_special_chars() {
+    assert_eq!(toml_escape("plain text"), "plain text");
+}
+
+// ─── format_codex_config_block ───
+
+#[test]
+fn format_codex_config_block_single_agent() {
+    let entries = vec![CodexConfigEntry {
+        name: "DataAnalyst".into(),
+        description: "Data analyst specialist".into(),
+    }];
+    let block = format_codex_config_block(&entries, "forge-council/agents");
+    assert!(block.contains("# BEGIN forge-council agents"));
+    assert!(block.contains("# Generated by install-agents (forge-council/agents)"));
+    assert!(block.contains("[agents.DataAnalyst]"));
+    assert!(block.contains("description = \"Data analyst specialist\""));
+    assert!(block.contains("config_file = \"agents/DataAnalyst.toml\""));
+    assert!(block.contains("# END forge-council agents"));
+}
+
+#[test]
+fn format_codex_config_block_multiple_agents() {
+    let entries = vec![
+        CodexConfigEntry {
+            name: "DataAnalyst".into(),
+            description: "Data analyst".into(),
+        },
+        CodexConfigEntry {
+            name: "SecurityArchitect".into(),
+            description: "Security architect".into(),
+        },
+    ];
+    let block = format_codex_config_block(&entries, "test");
+    let da_pos = block.find("[agents.DataAnalyst]").unwrap();
+    let sa_pos = block.find("[agents.SecurityArchitect]").unwrap();
+    assert!(da_pos < sa_pos);
+    assert!(block.contains("config_file = \"agents/SecurityArchitect.toml\""));
+}
+
+#[test]
+fn format_codex_config_block_escapes_description() {
+    let entries = vec![CodexConfigEntry {
+        name: "Test".into(),
+        description: r#"Agent with "quotes" and \backslash"#.into(),
+    }];
+    let block = format_codex_config_block(&entries, "");
+    assert!(block.contains(r#"description = "Agent with \"quotes\" and \\backslash""#));
+}
+
+// ─── strip_managed_block ───
+
+#[test]
+fn strip_managed_block_basic() {
+    let content = "\
+[features]
+multi_agent = true
+
+# BEGIN forge-council agents
+[agents.Foo]
+description = \"Foo\"
+# END forge-council agents
+";
+    let stripped = strip_managed_block(content, CODEX_BLOCK_BEGIN, CODEX_BLOCK_END);
+    assert!(!stripped.contains("agents.Foo"));
+    assert!(!stripped.contains("BEGIN forge-council"));
+    assert!(stripped.contains("multi_agent = true"));
+}
+
+#[test]
+fn strip_managed_block_no_block_present() {
+    let content = "[features]\nmulti_agent = true\n";
+    let stripped = strip_managed_block(content, CODEX_BLOCK_BEGIN, CODEX_BLOCK_END);
+    assert!(stripped.contains("multi_agent = true"));
+}
+
+// ─── write_codex_config_block ───
+
+#[test]
+fn write_codex_config_preserves_existing() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+    fs::write(&config_path, "[features]\nmulti_agent = true\n").unwrap();
+
+    let entries = vec![CodexConfigEntry {
+        name: "Dev".into(),
+        description: "Developer".into(),
+    }];
+    write_codex_config_block(&config_path, &entries, "test", false).unwrap();
+
+    let result = fs::read_to_string(&config_path).unwrap();
+    assert!(result.contains("multi_agent = true"));
+    assert!(result.contains("[agents.Dev]"));
+    assert!(result.contains("# BEGIN forge-council agents"));
+}
+
+#[test]
+fn write_codex_config_replaces_managed_block() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let initial = "\
+[features]
+multi_agent = true
+
+# BEGIN forge-council agents
+[agents.OldAgent]
+description = \"Old\"
+config_file = \"agents/OldAgent.toml\"
+# END forge-council agents
+";
+    fs::write(&config_path, initial).unwrap();
+
+    let entries = vec![CodexConfigEntry {
+        name: "NewAgent".into(),
+        description: "New".into(),
+    }];
+    write_codex_config_block(&config_path, &entries, "test", false).unwrap();
+
+    let result = fs::read_to_string(&config_path).unwrap();
+    assert!(result.contains("[agents.NewAgent]"));
+    assert!(!result.contains("OldAgent"));
+    assert_eq!(
+        result.matches("BEGIN forge-council agents").count(),
+        1,
+        "should have exactly one managed block"
+    );
+}
+
+#[test]
+fn write_codex_config_creates_new_file() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("sub").join("config.toml");
+
+    let entries = vec![CodexConfigEntry {
+        name: "Dev".into(),
+        description: "Developer".into(),
+    }];
+    write_codex_config_block(&config_path, &entries, "test", false).unwrap();
+
+    assert!(config_path.exists());
+    let result = fs::read_to_string(&config_path).unwrap();
+    assert!(result.contains("[agents.Dev]"));
+}
+
+// ─── clean_codex_config_block ───
+
+#[test]
+fn clean_codex_config_block_removes_managed() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let content = "\
+[features]
+multi_agent = true
+
+# BEGIN forge-council agents
+[agents.Dev]
+description = \"Dev\"
+# END forge-council agents
+";
+    fs::write(&config_path, content).unwrap();
+
+    clean_codex_config_block(&config_path, false).unwrap();
+
+    let result = fs::read_to_string(&config_path).unwrap();
+    assert!(!result.contains("agents.Dev"));
+    assert!(!result.contains("BEGIN forge-council"));
+    assert!(result.contains("multi_agent = true"));
+}
+
+#[test]
+fn clean_codex_config_block_noop_when_missing() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+    // File doesn't exist — should be a no-op
+    clean_codex_config_block(&config_path, false).unwrap();
+    assert!(!config_path.exists());
 }

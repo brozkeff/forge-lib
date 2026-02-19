@@ -1,5 +1,6 @@
 use forge_lib::deploy::provider::Provider;
-use forge_lib::deploy::{self, DeployResult};
+use forge_lib::deploy::{self, CodexConfigEntry, DeployResult};
+use forge_lib::parse;
 use forge_lib::sidecar::SidecarConfig;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -123,19 +124,34 @@ fn run(args: &Args) -> ExitCode {
         eprintln!("Targeting provider directory: {}", dst_dir.display());
 
         if args.clean {
-            match deploy::clean_agents(src_path, dst_dir, args.dry_run) {
+            match deploy::clean_agents(src_path, dst_dir, provider, args.dry_run) {
                 Ok(removed) => {
+                    let ext = provider.agent_extension();
                     for name in &removed {
                         if args.dry_run {
-                            println!("[dry-run] Would remove: {name}.md");
+                            println!("[dry-run] Would remove: {name}.{ext}");
                         } else {
-                            println!("Removed: {name}.md");
+                            println!("Removed: {name}.{ext}");
                         }
                     }
                 }
                 Err(e) => {
                     eprintln!("Error: {e}");
                     return ExitCode::from(1);
+                }
+            }
+
+            if provider == Provider::Codex {
+                let codex_root = dst_dir.parent().unwrap_or(dst_dir);
+                let config_path = codex_root.join("config.toml");
+                if let Err(e) = deploy::clean_codex_config_block(&config_path, args.dry_run) {
+                    eprintln!("Error cleaning config.toml: {e}");
+                    return ExitCode::from(1);
+                }
+                if args.dry_run {
+                    println!("[dry-run] Would clean config.toml managed block");
+                } else {
+                    println!("Cleaned config.toml managed block");
                 }
             }
         }
@@ -149,6 +165,33 @@ fn run(args: &Args) -> ExitCode {
             &source_prefix,
         ) {
             return code;
+        }
+
+        if provider == Provider::Codex {
+            let codex_root = dst_dir.parent().unwrap_or(dst_dir);
+            let config_path = codex_root.join("config.toml");
+            let entries = collect_codex_entries(src_path, provider, &config, &source_prefix);
+            if let Err(e) = deploy::write_codex_config_block(
+                &config_path,
+                &entries,
+                &source_prefix,
+                args.dry_run,
+            ) {
+                eprintln!("Error writing config.toml: {e}");
+                return ExitCode::from(1);
+            }
+            if args.dry_run {
+                println!(
+                    "[dry-run] Would write config.toml with {} agent entries",
+                    entries.len()
+                );
+            } else {
+                println!(
+                    "Updated {} with {} agent entries",
+                    config_path.display(),
+                    entries.len()
+                );
+            }
         }
     }
 
@@ -170,26 +213,65 @@ fn deploy_to_dir(
                 ExitCode::from(1)
             })?;
 
+    let ext = provider.agent_extension();
     for (filename, result) in &results {
         let name = filename.trim_end_matches(".md");
         match result {
             DeployResult::Deployed => {
                 if dry_run {
                     println!(
-                        "[dry-run] Would install: {name}.md to {}",
+                        "[dry-run] Would install: {name}.{ext} to {}",
                         dst_dir.display()
                     );
                 } else {
-                    println!("Installed: {name}.md to {}", dst_dir.display());
+                    println!("Installed: {name}.{ext} to {}", dst_dir.display());
                 }
             }
             DeployResult::SkippedUserOwned => {
-                eprintln!("Warning: Skipping {name}.md — user-created agent (no source field)");
+                eprintln!("Warning: Skipping {name}.{ext} — user-created agent (no source field)");
             }
             DeployResult::SkippedTemplate | DeployResult::SkippedNoName => {}
         }
     }
     Ok(())
+}
+
+fn collect_codex_entries(
+    src_dir: &Path,
+    provider: Provider,
+    config: &SidecarConfig,
+    source_prefix: &str,
+) -> Vec<CodexConfigEntry> {
+    let Ok(rd) = std::fs::read_dir(src_dir) else {
+        return Vec::new();
+    };
+
+    let mut files: Vec<_> = rd
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    files.sort_by_key(std::fs::DirEntry::file_name);
+
+    let mut entries = Vec::new();
+    for entry in files {
+        let path = entry.path();
+        let filename = entry.file_name().to_string_lossy().to_string();
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Some(meta) =
+            deploy::extract_agent_meta(&content, &filename, provider, config, source_prefix)
+        {
+            if parse::validate_agent_name(&meta.name).is_ok() {
+                entries.push(CodexConfigEntry {
+                    name: meta.name,
+                    description: meta.description,
+                });
+            }
+        }
+    }
+
+    entries
 }
 
 fn main() -> ExitCode {

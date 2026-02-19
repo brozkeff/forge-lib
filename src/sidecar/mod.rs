@@ -83,6 +83,15 @@ impl SidecarConfig {
         normalize_value(val)
     }
 
+    pub fn provider_reasoning_effort(&self, provider: &str, model_tier: &str) -> Option<String> {
+        let val = navigate(
+            &self.raw,
+            &["providers", provider, "reasoning_effort", model_tier],
+        )
+        .or_else(|| navigate(&self.raw, &[provider, "reasoning_effort", model_tier]))?;
+        normalize_value(val)
+    }
+
     pub fn global_tiers(&self) -> ModelTiers {
         let shared =
             navigate(&self.raw, &["shared", "models"]).or_else(|| navigate(&self.raw, &["models"]));

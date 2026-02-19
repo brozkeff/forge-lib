@@ -315,6 +315,26 @@ fn synced_from_source_frontmatter_wrong_file() {
     assert!(!is_synced_from(content, "Other.md"));
 }
 
+// --- is_synced_from: TOML source comment ---
+
+#[test]
+fn synced_from_toml_source_comment() {
+    let content = "# source: Agent.md\ndescription = \"Dev\"\n";
+    assert!(is_synced_from(content, "Agent.md"));
+}
+
+#[test]
+fn synced_from_toml_source_with_prefix() {
+    let content = "# source: forge-council/agents/Agent.md\ndescription = \"Dev\"\n";
+    assert!(is_synced_from(content, "Agent.md"));
+}
+
+#[test]
+fn synced_from_toml_source_wrong_file() {
+    let content = "# source: Other.md\ndescription = \"Dev\"\n";
+    assert!(!is_synced_from(content, "Agent.md"));
+}
+
 // --- proptest ---
 
 #[cfg(test)]

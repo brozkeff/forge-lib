@@ -482,6 +482,51 @@ fn merge_deep_nested() {
     assert_eq!(strong, Value::String("opus".into()));
 }
 
+// --- provider_reasoning_effort ---
+
+#[test]
+fn reasoning_effort_reads_tier() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        concat!(
+            "providers:\n  codex:\n    reasoning_effort:\n",
+            "      fast: low\n      strong: medium\n",
+        ),
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.provider_reasoning_effort("codex", "fast"),
+        Some("low".into())
+    );
+    assert_eq!(
+        config.provider_reasoning_effort("codex", "strong"),
+        Some("medium".into())
+    );
+}
+
+#[test]
+fn reasoning_effort_missing_returns_none() {
+    let config = SidecarConfig::default();
+    assert_eq!(config.provider_reasoning_effort("codex", "fast"), None);
+}
+
+#[test]
+fn reasoning_effort_flat_fallback() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "codex:\n  reasoning_effort:\n    fast: low\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.provider_reasoning_effort("codex", "fast"),
+        Some("low".into())
+    );
+}
+
 // --- proptest ---
 
 #[cfg(test)]

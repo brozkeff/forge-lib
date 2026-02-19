@@ -63,6 +63,13 @@ impl Provider {
             .join(", ")
     }
 
+    pub fn agent_extension(&self) -> &'static str {
+        match self {
+            Self::Codex => "toml",
+            Self::Claude | Self::Gemini => "md",
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Claude => "claude",
