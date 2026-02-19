@@ -139,6 +139,38 @@ fn load_empty_yaml_returns_defaults() {
     assert_eq!(tiers.strong, "opus");
 }
 
+#[test]
+fn load_yml_extension() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yml",
+        "shared:\n  models:\n    fast: haiku\n    strong: sonnet\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let tiers = config.global_tiers();
+    assert_eq!(tiers.fast, "haiku");
+    assert_eq!(tiers.strong, "sonnet");
+}
+
+#[test]
+fn load_yaml_takes_priority_over_yml() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "shared:\n  models:\n    fast: sonnet\n",
+    );
+    write_yaml(
+        dir.path(),
+        "defaults.yml",
+        "shared:\n  models:\n    fast: haiku\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let tiers = config.global_tiers();
+    assert_eq!(tiers.fast, "sonnet");
+}
+
 // --- provider_tiers ---
 
 #[test]

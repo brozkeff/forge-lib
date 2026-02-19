@@ -27,11 +27,12 @@ impl Default for SidecarConfig {
 
 impl SidecarConfig {
     pub fn load(module_root: &Path) -> Self {
-        let config_path = module_root.join("config.yaml");
-        let defaults_path = module_root.join("defaults.yaml");
-
-        let defaults = load_yaml_file(&defaults_path).unwrap_or(Value::Null);
-        let config = load_yaml_file(&config_path).unwrap_or(Value::Null);
+        let defaults = load_yaml_file(&module_root.join("defaults.yaml"))
+            .or_else(|| load_yaml_file(&module_root.join("defaults.yml")))
+            .unwrap_or(Value::Null);
+        let config = load_yaml_file(&module_root.join("config.yaml"))
+            .or_else(|| load_yaml_file(&module_root.join("config.yml")))
+            .unwrap_or(Value::Null);
 
         let merged = merge_values(defaults, config);
         Self { raw: merged }
