@@ -149,12 +149,30 @@ fn provider_specific_override() {
         "defaults.yaml",
         concat!(
             "shared:\n  models:\n    fast: sonnet\n    strong: opus\n",
-            "providers:\n  gemini:\n    models:\n      fast: gemini-2.0-flash\n",
+            "providers:\n  gemini:\n    models:\n      - gemini-2.0-flash\n      - gemini-2.5-pro\n",
+            "    fast: gemini-2.0-flash\n    strong: gemini-2.5-pro\n",
         ),
     );
     let config = SidecarConfig::load(dir.path());
     let tiers = config.provider_tiers("gemini");
     assert_eq!(tiers.fast, "gemini-2.0-flash");
+    assert_eq!(tiers.strong, "gemini-2.5-pro");
+}
+
+#[test]
+fn provider_partial_override_falls_back_to_global() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        concat!(
+            "shared:\n  models:\n    fast: sonnet\n    strong: opus\n",
+            "providers:\n  claude:\n    fast: claude-sonnet-4-6\n",
+        ),
+    );
+    let config = SidecarConfig::load(dir.path());
+    let tiers = config.provider_tiers("claude");
+    assert_eq!(tiers.fast, "claude-sonnet-4-6");
     assert_eq!(tiers.strong, "opus");
 }
 

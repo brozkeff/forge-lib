@@ -40,9 +40,6 @@ impl SidecarConfig {
     pub fn provider_tiers(&self, provider: &str) -> ModelTiers {
         let global = self.global_tiers();
 
-        // Legacy: providers -> provider -> models (Mapping with fast/strong)
-        // New:    providers -> provider (fast/strong as direct keys, models is a whitelist Sequence)
-        // Flat:   provider (root-level key)
         let provider_section = navigate(&self.raw, &["providers", provider, "models"])
             .filter(Value::is_mapping)
             .or_else(|| navigate(&self.raw, &["providers", provider]))

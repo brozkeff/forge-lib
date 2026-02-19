@@ -98,10 +98,10 @@ pub fn is_synced_from(content: &str, expected_source: &str) -> bool {
         }
     }
     // Legacy format: # synced-from: in body
-    let expected = format!("# synced-from: {expected_source}");
+    let expected_comment = format!("# synced-from: {expected_source}");
     let body = fm_body(content);
     let first_line = body.lines().next().unwrap_or("");
-    first_line == expected
+    first_line == expected_comment
 }
 
 #[cfg(test)]

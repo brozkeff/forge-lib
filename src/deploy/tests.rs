@@ -4,6 +4,10 @@ use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
+fn write_yaml(dir: &Path, filename: &str, content: &str) {
+    fs::write(dir.join(filename), content).unwrap();
+}
+
 // ─── Provider Fixture ───
 
 #[test]
@@ -436,6 +440,55 @@ fn extract_gemini_formats_display_name() {
     .unwrap();
     assert_eq!(meta.name, "SecurityArchitect");
     assert_eq!(meta.display_name, "security-architect");
+}
+
+#[test]
+fn extract_plain_name_fallback() {
+    let content = "\
+---
+name: TheOpponent
+description: \"Devil's advocate -- stress-tests ideas. USE WHEN critical analysis.\"
+version: 0.3.0
+---
+Body.
+";
+    let config = SidecarConfig::default();
+    let meta =
+        extract_agent_meta(content, "TheOpponent.md", Provider::Claude, &config, "").unwrap();
+    assert_eq!(meta.name, "TheOpponent");
+    assert_eq!(
+        meta.description,
+        "Devil's advocate -- stress-tests ideas. USE WHEN critical analysis."
+    );
+    assert_eq!(meta.model, "sonnet");
+    assert!(meta.tools.is_none());
+}
+
+#[test]
+fn extract_plain_name_with_sidecar_override() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        concat!(
+            "agents:\n  TheOpponent:\n    model: strong\n    tools: Read, Grep, Glob, WebSearch\n",
+            "providers:\n  claude:\n    fast: claude-sonnet-4-6\n    strong: claude-opus-4-6\n",
+        ),
+    );
+    let content = "\
+---
+name: TheOpponent
+description: \"Devil's advocate. USE WHEN critical analysis.\"
+version: 0.3.0
+---
+Body.
+";
+    let config = SidecarConfig::load(dir.path());
+    let meta =
+        extract_agent_meta(content, "TheOpponent.md", Provider::Claude, &config, "").unwrap();
+    assert_eq!(meta.name, "TheOpponent");
+    assert_eq!(meta.model, "claude-opus-4-6");
+    assert_eq!(meta.tools, Some("Read, Grep, Glob, WebSearch".into()));
 }
 
 // ─── deploy_agent ───

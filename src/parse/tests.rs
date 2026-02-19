@@ -309,6 +309,12 @@ fn synced_from_frontmatter_source_with_prefix() {
     assert!(is_synced_from(content, "Agent.md"));
 }
 
+#[test]
+fn synced_from_source_frontmatter_wrong_file() {
+    let content = "---\nname: TheOpponent\nsource: forge-council/agents/TheOpponent.md\n---\nBody";
+    assert!(!is_synced_from(content, "Other.md"));
+}
+
 // --- proptest ---
 
 #[cfg(test)]
