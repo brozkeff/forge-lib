@@ -60,8 +60,7 @@ impl SidecarConfig {
     pub fn is_model_whitelisted(&self, provider: &str, model: &str) -> bool {
         let whitelist = navigate(&self.raw, &["providers", provider, "whitelist"])
             .or_else(|| {
-                navigate(&self.raw, &["providers", provider, "models"])
-                    .filter(Value::is_sequence)
+                navigate(&self.raw, &["providers", provider, "models"]).filter(Value::is_sequence)
             })
             .or_else(|| navigate(&self.raw, &[provider, "models"]));
         match whitelist {

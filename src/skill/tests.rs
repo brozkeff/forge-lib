@@ -119,10 +119,8 @@ fn fixture_generate_codex_skill_wrapper_from_agent() {
     assert!(result.skill_yaml.contains("name: SecurityArchitect"));
     assert!(result.skill_yaml.contains("enabled: false"));
     assert!(result.skill_yaml.contains("enabled: true"));
-    assert!(result.skill_yaml.contains("source: generated-from-agent"));
-    assert!(result
-        .skill_yaml
-        .contains("synced-from: SecurityArchitect.md"));
+    assert!(result.skill_yaml.contains("method: generated-from-agent"));
+    assert!(result.skill_yaml.contains("source: SecurityArchitect.md"));
 }
 
 // ─── parse_skill_yaml ───

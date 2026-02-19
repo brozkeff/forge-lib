@@ -49,7 +49,7 @@ fn deploy_basic() {
 
     assert!(dst.join("TestAgent.md").exists());
     let content = fs::read_to_string(dst.join("TestAgent.md")).unwrap();
-    assert!(content.contains("# synced-from: TestAgent.md"));
+    assert!(content.contains("source: TestAgent.md"));
 }
 
 #[test]

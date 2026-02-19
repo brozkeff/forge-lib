@@ -297,6 +297,18 @@ fn synced_from_empty_content() {
     assert!(!is_synced_from("", "Agent.md"));
 }
 
+#[test]
+fn synced_from_frontmatter_source_exact() {
+    let content = "---\nname: Agent\nsource: Agent.md\n---\nBody";
+    assert!(is_synced_from(content, "Agent.md"));
+}
+
+#[test]
+fn synced_from_frontmatter_source_with_prefix() {
+    let content = "---\nname: Agent\nsource: forge-council/agents/Agent.md\n---\nBody";
+    assert!(is_synced_from(content, "Agent.md"));
+}
+
 // --- proptest ---
 
 #[cfg(test)]

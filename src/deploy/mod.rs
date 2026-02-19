@@ -81,8 +81,8 @@ pub fn extract_agent_meta(
         return None;
     }
 
-    let name = parse::fm_value(content, "name")
-        .or_else(|| parse::fm_value(content, "claude.name"))?;
+    let name =
+        parse::fm_value(content, "name").or_else(|| parse::fm_value(content, "claude.name"))?;
     if name.is_empty() {
         return None;
     }
@@ -200,8 +200,15 @@ pub fn deploy_agents_from_dir(
         let filename = entry.file_name().to_string_lossy().to_string();
         let content = std::fs::read_to_string(&path)
             .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-        let result =
-            deploy_agent(&content, &filename, dst_dir, provider, config, dry_run, source_prefix)?;
+        let result = deploy_agent(
+            &content,
+            &filename,
+            dst_dir,
+            provider,
+            config,
+            dry_run,
+            source_prefix,
+        )?;
         results.push((filename, result));
     }
 

@@ -93,9 +93,7 @@ pub fn validate_agent_name(name: &str) -> Result<(), String> {
 pub fn is_synced_from(content: &str, expected_source: &str) -> bool {
     // New format: source: in frontmatter (value ends with /filename or equals filename)
     if let Some(source) = fm_value(content, "source") {
-        if source == expected_source
-            || source.ends_with(&format!("/{expected_source}"))
-        {
+        if source == expected_source || source.ends_with(&format!("/{expected_source}")) {
             return true;
         }
     }

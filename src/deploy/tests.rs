@@ -234,6 +234,7 @@ You are a security architect.
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::Deployed)));
     let deployed = fs::read_to_string(claude_dir.join("SecurityArchitect.md")).unwrap();
@@ -249,6 +250,7 @@ You are a security architect.
         Provider::Gemini,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::Deployed)));
     let deployed = fs::read_to_string(gemini_dir.join("SecurityArchitect.md")).unwrap();
@@ -279,7 +281,8 @@ fn format_claude_with_model_and_tools() {
     assert!(output.contains("name: SecurityArchitect\n"));
     assert!(output.contains("model: sonnet\n"));
     assert!(output.contains("tools: Read, Bash\n"));
-    assert!(output.contains("# synced-from: SecurityArchitect.md"));
+    assert!(output.contains("source: SecurityArchitect.md"));
+    assert!(!output.contains("# synced-from:"));
     assert!(output.contains("Body text.\n"));
 }
 
@@ -344,7 +347,7 @@ fn format_codex_same_as_claude() {
 }
 
 #[test]
-fn format_synced_from_always_present() {
+fn format_source_always_in_frontmatter() {
     let meta = make_meta();
     let claude = format_agent_output(&meta, "B.\n", Provider::Claude, true);
     let gemini = format_agent_output(
@@ -356,8 +359,11 @@ fn format_synced_from_always_present() {
         Provider::Gemini,
         true,
     );
-    assert!(claude.contains("# synced-from: SecurityArchitect.md"));
-    assert!(gemini.contains("# synced-from: SecurityArchitect.md"));
+    assert!(claude.contains("source: SecurityArchitect.md"));
+    assert!(gemini.contains("source: SecurityArchitect.md"));
+    // source: should be in frontmatter (before closing ---), not in body
+    assert!(!claude.contains("# synced-from:"));
+    assert!(!gemini.contains("# synced-from:"));
 }
 
 #[test]
@@ -384,7 +390,7 @@ claude.tools:
 Body.
 ";
     let config = SidecarConfig::default();
-    let meta = extract_agent_meta(content, "Developer.md", Provider::Claude, &config).unwrap();
+    let meta = extract_agent_meta(content, "Developer.md", Provider::Claude, &config, "").unwrap();
     assert_eq!(meta.name, "Developer");
     assert_eq!(meta.display_name, "Developer");
     assert_eq!(meta.model, "sonnet");
@@ -396,21 +402,23 @@ Body.
 fn extract_template_returns_none() {
     let content = "---\nclaude.name: Foo\n---\nBody.\n";
     let config = SidecarConfig::default();
-    assert!(extract_agent_meta(content, "_TemplateFoo.md", Provider::Claude, &config).is_none());
+    assert!(
+        extract_agent_meta(content, "_TemplateFoo.md", Provider::Claude, &config, "").is_none()
+    );
 }
 
 #[test]
 fn extract_missing_name_returns_none() {
     let content = "---\nclaude.model: sonnet\n---\nBody.\n";
     let config = SidecarConfig::default();
-    assert!(extract_agent_meta(content, "Foo.md", Provider::Claude, &config).is_none());
+    assert!(extract_agent_meta(content, "Foo.md", Provider::Claude, &config, "").is_none());
 }
 
 #[test]
 fn extract_defaults_model_to_sonnet() {
     let content = "---\nclaude.name: Tester\n---\nBody.\n";
     let config = SidecarConfig::default();
-    let meta = extract_agent_meta(content, "Tester.md", Provider::Claude, &config).unwrap();
+    let meta = extract_agent_meta(content, "Tester.md", Provider::Claude, &config, "").unwrap();
     assert_eq!(meta.model, "sonnet");
 }
 
@@ -418,8 +426,14 @@ fn extract_defaults_model_to_sonnet() {
 fn extract_gemini_formats_display_name() {
     let content = "---\nclaude.name: SecurityArchitect\n---\nBody.\n";
     let config = SidecarConfig::default();
-    let meta =
-        extract_agent_meta(content, "SecurityArchitect.md", Provider::Gemini, &config).unwrap();
+    let meta = extract_agent_meta(
+        content,
+        "SecurityArchitect.md",
+        Provider::Gemini,
+        &config,
+        "",
+    )
+    .unwrap();
     assert_eq!(meta.name, "SecurityArchitect");
     assert_eq!(meta.display_name, "security-architect");
 }
@@ -452,6 +466,7 @@ fn deploy_basic() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::Deployed)));
     assert!(dir.path().join("Developer.md").exists());
@@ -468,6 +483,7 @@ fn deploy_template_skip() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::SkippedTemplate)));
 }
@@ -488,6 +504,7 @@ fn deploy_user_protection() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::SkippedUserOwned)));
 }
@@ -508,6 +525,7 @@ fn deploy_synced_overwrite() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::Deployed)));
     let content = fs::read_to_string(dir.path().join("Developer.md")).unwrap();
@@ -526,6 +544,7 @@ fn deploy_no_name() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::SkippedNoName)));
 }
@@ -542,6 +561,7 @@ fn deploy_invalid_name() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(result.is_err());
 }
@@ -557,6 +577,7 @@ fn deploy_dry_run() {
         Provider::Claude,
         &config,
         true,
+        "",
     );
     assert!(matches!(result, Ok(DeployResult::Deployed)));
     assert!(!dir.path().join("Developer.md").exists());
@@ -576,6 +597,7 @@ fn deploy_symlink_rejected() {
         Provider::Claude,
         &config,
         false,
+        "",
     );
     assert!(result.is_err());
 }
@@ -598,7 +620,8 @@ fn deploy_from_dir_multiple() {
     .unwrap();
     let config = SidecarConfig::default();
     let results =
-        deploy_agents_from_dir(src.path(), dst.path(), Provider::Claude, &config, false).unwrap();
+        deploy_agents_from_dir(src.path(), dst.path(), Provider::Claude, &config, false, "")
+            .unwrap();
     assert_eq!(results.len(), 2);
     assert!(dst.path().join("Developer.md").exists());
     assert!(dst.path().join("Tester.md").exists());
@@ -614,6 +637,7 @@ fn deploy_from_dir_missing_src() {
         Provider::Claude,
         &config,
         false,
+        "",
     )
     .unwrap();
     assert!(results.is_empty());
@@ -702,7 +726,7 @@ version: 0.3.0
 ---
 You are a developer.
 ";
-    let meta = extract_agent_meta(content, "Developer.md", Provider::Claude, &config).unwrap();
+    let meta = extract_agent_meta(content, "Developer.md", Provider::Claude, &config, "").unwrap();
     assert_eq!(meta.name, "Developer");
     assert_eq!(meta.model, "sonnet");
     assert_eq!(
@@ -723,7 +747,7 @@ version: 0.3.0
 ---
 Body.
 ";
-    let meta = extract_agent_meta(content, "Tester.md", Provider::Claude, &config).unwrap();
+    let meta = extract_agent_meta(content, "Tester.md", Provider::Claude, &config, "").unwrap();
     assert_eq!(meta.name, "Tester");
     assert_eq!(meta.model, "sonnet");
     assert_eq!(meta.description, "QA specialist");
@@ -736,8 +760,9 @@ fn extract_new_format_gemini_model_resolution() {
         "agents:\n  Opponent:\n    model: strong\n    tools: Read, Grep, Glob\n",
         "providers:\n  gemini:\n    fast: gemini-2.0-flash\n    strong: gemini-2.5-pro\n",
     ));
-    let content = "---\nname: Opponent\ndescription: Devil's advocate\nversion: 0.3.0\n---\nBody.\n";
-    let meta = extract_agent_meta(content, "Opponent.md", Provider::Gemini, &config).unwrap();
+    let content =
+        "---\nname: Opponent\ndescription: Devil's advocate\nversion: 0.3.0\n---\nBody.\n";
+    let meta = extract_agent_meta(content, "Opponent.md", Provider::Gemini, &config, "").unwrap();
     assert_eq!(meta.model, "gemini-2.5-pro");
     assert_eq!(meta.display_name, "opponent");
 }
@@ -761,7 +786,15 @@ version: 0.3.0
 You are a developer.
 ";
     let dst = TempDir::new().unwrap();
-    let result = deploy_agent(content, "Developer.md", dst.path(), Provider::Claude, &config, false);
+    let result = deploy_agent(
+        content,
+        "Developer.md",
+        dst.path(),
+        Provider::Claude,
+        &config,
+        false,
+        "",
+    );
     assert!(matches!(result, Ok(DeployResult::Deployed)));
     let deployed = fs::read_to_string(dst.path().join("Developer.md")).unwrap();
     assert!(deployed.contains("name: Developer"));
@@ -795,7 +828,8 @@ fn deploy_new_format_from_dir() {
     let config = SidecarConfig::load(cfg_dir.path());
 
     let results =
-        deploy_agents_from_dir(src.path(), dst.path(), Provider::Claude, &config, false).unwrap();
+        deploy_agents_from_dir(src.path(), dst.path(), Provider::Claude, &config, false, "")
+            .unwrap();
     assert_eq!(results.len(), 2);
     assert!(dst.path().join("Developer.md").exists());
     assert!(dst.path().join("Tester.md").exists());
@@ -818,6 +852,67 @@ fn clean_new_format() {
     let removed = clean_agents(src.path(), dst.path(), false).unwrap();
     assert_eq!(removed, vec!["Developer"]);
     assert!(!dst.path().join("Developer.md").exists());
+}
+
+// ─── source prefix ───
+
+#[test]
+fn extract_source_prefix_produces_full_path() {
+    let config = SidecarConfig::default();
+    let content = "---\nname: Dev\ndescription: Developer\nversion: 0.3.0\n---\nBody.\n";
+    let meta = extract_agent_meta(
+        content,
+        "Dev.md",
+        Provider::Claude,
+        &config,
+        "forge-council/agents",
+    )
+    .unwrap();
+    assert_eq!(meta.source, "forge-council/agents/Dev.md");
+    assert_eq!(meta.source_file, "Dev.md");
+}
+
+#[test]
+fn deploy_source_in_frontmatter() {
+    let dst = TempDir::new().unwrap();
+    let config = SidecarConfig::default();
+    let content = "---\nname: Dev\ndescription: Developer\nversion: 0.3.0\n---\nBody.\n";
+    let result = deploy_agent(
+        content,
+        "Dev.md",
+        dst.path(),
+        Provider::Claude,
+        &config,
+        false,
+        "forge-council/agents",
+    );
+    assert!(matches!(result, Ok(DeployResult::Deployed)));
+    let deployed = fs::read_to_string(dst.path().join("Dev.md")).unwrap();
+    assert!(deployed.contains("source: forge-council/agents/Dev.md"));
+    assert!(!deployed.contains("# synced-from:"));
+}
+
+#[test]
+fn deploy_overwrite_new_format_source() {
+    let dir = TempDir::new().unwrap();
+    let config = SidecarConfig::default();
+    fs::write(
+        dir.path().join("Developer.md"),
+        "---\nname: Developer\nsource: Developer.md\n---\nOld.\n",
+    )
+    .unwrap();
+    let result = deploy_agent(
+        &agent_fixture(),
+        "Developer.md",
+        dir.path(),
+        Provider::Claude,
+        &config,
+        false,
+        "",
+    );
+    assert!(matches!(result, Ok(DeployResult::Deployed)));
+    let content = fs::read_to_string(dir.path().join("Developer.md")).unwrap();
+    assert!(content.contains("You are a developer."));
 }
 
 // ─── scope_dirs ───

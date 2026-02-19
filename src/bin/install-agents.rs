@@ -84,13 +84,12 @@ fn parse_args() -> Result<Args, ExitCode> {
 
 fn read_module_name() -> Option<String> {
     let content = std::fs::read_to_string("module.yaml").ok()?;
-    forge_lib::parse::fm_value(&content, "name")
-        .or_else(|| {
-            content.lines().find_map(|l| {
-                l.strip_prefix("name:")
-                    .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
-            })
+    forge_lib::parse::fm_value(&content, "name").or_else(|| {
+        content.lines().find_map(|l| {
+            l.strip_prefix("name:")
+                .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
         })
+    })
 }
 
 fn run(args: &Args) -> ExitCode {
@@ -141,9 +140,14 @@ fn run(args: &Args) -> ExitCode {
             }
         }
 
-        if let Err(code) =
-            deploy_to_dir(src_path, dst_dir, provider, &config, args.dry_run, &source_prefix)
-        {
+        if let Err(code) = deploy_to_dir(
+            src_path,
+            dst_dir,
+            provider,
+            &config,
+            args.dry_run,
+            &source_prefix,
+        ) {
             return code;
         }
     }
@@ -161,10 +165,10 @@ fn deploy_to_dir(
 ) -> Result<(), ExitCode> {
     let results =
         deploy::deploy_agents_from_dir(src_path, dst_dir, provider, config, dry_run, source_prefix)
-        .map_err(|e| {
-            eprintln!("Error: {e}");
-            ExitCode::from(1)
-        })?;
+            .map_err(|e| {
+                eprintln!("Error: {e}");
+                ExitCode::from(1)
+            })?;
 
     for (filename, result) in &results {
         let name = filename.trim_end_matches(".md");
@@ -180,9 +184,7 @@ fn deploy_to_dir(
                 }
             }
             DeployResult::SkippedUserOwned => {
-                eprintln!(
-                    "Warning: Skipping {name}.md — user-created agent (no source field)"
-                );
+                eprintln!("Warning: Skipping {name}.md — user-created agent (no source field)");
             }
             DeployResult::SkippedTemplate | DeployResult::SkippedNoName => {}
         }
