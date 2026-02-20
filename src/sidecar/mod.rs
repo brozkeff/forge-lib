@@ -83,6 +83,29 @@ impl SidecarConfig {
         normalize_value(val)
     }
 
+    pub fn provider_skills(&self, provider: &str) -> Vec<String> {
+        let Some(section) = navigate(&self.raw, &["skills", provider]) else {
+            return Vec::new();
+        };
+        let Some(mapping) = section.as_mapping() else {
+            return Vec::new();
+        };
+        mapping
+            .keys()
+            .filter_map(|k| k.as_str().map(String::from))
+            .collect()
+    }
+
+    pub fn provider_skill_value(
+        &self,
+        provider: &str,
+        skill: &str,
+        key: &str,
+    ) -> Option<String> {
+        let val = navigate(&self.raw, &["skills", provider, skill, key])?;
+        normalize_value(val)
+    }
+
     pub fn provider_reasoning_effort(&self, provider: &str, model_tier: &str) -> Option<String> {
         let val = navigate(
             &self.raw,

@@ -527,6 +527,127 @@ fn reasoning_effort_flat_fallback() {
     );
 }
 
+// --- provider_skills ---
+
+#[test]
+fn provider_skills_returns_map_keys() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    claude:\n        DebateCouncil:\n        Demo:\n        DeveloperCouncil:\n            scope: workspace\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let skills = config.provider_skills("claude");
+    assert_eq!(skills, vec!["DebateCouncil", "Demo", "DeveloperCouncil"]);
+}
+
+#[test]
+fn provider_skills_missing_provider_returns_empty() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    claude:\n        Demo:\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert!(config.provider_skills("gemini").is_empty());
+}
+
+#[test]
+fn provider_skills_missing_skills_key_returns_empty() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(dir.path(), "defaults.yaml", "agents:\n    Foo:\n");
+    let config = SidecarConfig::load(dir.path());
+    assert!(config.provider_skills("claude").is_empty());
+}
+
+#[test]
+fn provider_skills_empty_config_returns_empty() {
+    let config = SidecarConfig::default();
+    assert!(config.provider_skills("claude").is_empty());
+}
+
+#[test]
+fn provider_skills_null_values_are_keys() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    codex:\n        CleanText:\n        Summarize:\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let skills = config.provider_skills("codex");
+    assert_eq!(skills, vec!["CleanText", "Summarize"]);
+}
+
+// --- provider_skill_value ---
+
+#[test]
+fn provider_skill_value_reads_nested_config() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    claude:\n        DeveloperCouncil:\n            scope: workspace\n            roles:\n                - Dev\n                - QA\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.provider_skill_value("claude", "DeveloperCouncil", "scope"),
+        Some("workspace".into())
+    );
+}
+
+#[test]
+fn provider_skill_value_null_entry_returns_none() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    claude:\n        Demo:\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.provider_skill_value("claude", "Demo", "scope"),
+        None
+    );
+}
+
+#[test]
+fn provider_skill_value_missing_skill_returns_none() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    claude:\n        Demo:\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.provider_skill_value("claude", "NonExistent", "scope"),
+        None
+    );
+}
+
+#[test]
+fn provider_skill_value_config_override() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "skills:\n    claude:\n        Council:\n            scope: workspace\n",
+    );
+    write_yaml(
+        dir.path(),
+        "config.yaml",
+        "skills:\n    claude:\n        Council:\n            scope: user\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.provider_skill_value("claude", "Council", "scope"),
+        Some("user".into())
+    );
+}
+
 // --- proptest ---
 
 #[cfg(test)]

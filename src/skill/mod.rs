@@ -1,38 +1,17 @@
 use crate::deploy::provider::Provider;
 use crate::parse;
 use crate::sidecar::SidecarConfig;
-use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 // ─── Types ───
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SkillMeta {
     pub name: String,
     pub description: String,
-    #[serde(rename = "argument-hint")]
-    pub argument_hint: String,
-    #[serde(default)]
-    pub providers: SkillProviders,
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
-pub struct SkillProviders {
-    #[serde(default)]
-    pub claude: Option<SkillProviderEntry>,
-    #[serde(default)]
-    pub gemini: Option<SkillProviderEntry>,
-    #[serde(default)]
-    pub codex: Option<SkillProviderEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct SkillProviderEntry {
-    #[serde(default)]
-    pub enabled: Option<bool>,
-    #[serde(default)]
-    pub scope: Option<String>,
+    pub claude_fields: BTreeMap<String, String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -41,6 +20,7 @@ pub enum SkillInstallAction {
         skill_name: String,
         src_dir: PathBuf,
         dst_dir: PathBuf,
+        claude_fields: BTreeMap<String, String>,
     },
     GeminiCli {
         skill_name: String,
@@ -60,19 +40,55 @@ pub struct GeneratedSkill {
     pub skill_yaml: String,
 }
 
-// ─── Validation ───
+// ─── Skill Meta Extraction ───
 
-pub fn parse_skill_yaml(content: &str) -> Result<SkillMeta, String> {
-    serde_yaml::from_str(content).map_err(|e| format!("invalid SKILL.yaml: {e}"))
+pub fn extract_skill_meta(skill_dir: &Path) -> Option<SkillMeta> {
+    let md_path = skill_dir.join("SKILL.md");
+    let content = std::fs::read_to_string(&md_path).ok()?;
+
+    let name = parse::fm_value(&content, "name").filter(|n| !n.is_empty())?;
+    let description = parse::fm_value(&content, "description")
+        .unwrap_or_else(|| "Skill".into());
+
+    let claude_fields = read_claude_fields(&skill_dir.join("SKILL.yaml"));
+
+    Some(SkillMeta {
+        name,
+        description,
+        claude_fields,
+    })
 }
 
-pub fn skill_enabled_for_provider(meta: &SkillMeta, provider: Provider) -> bool {
-    let entry = match provider {
-        Provider::Claude => meta.providers.claude.as_ref(),
-        Provider::Gemini => meta.providers.gemini.as_ref(),
-        Provider::Codex => meta.providers.codex.as_ref(),
+fn read_claude_fields(yaml_path: &Path) -> BTreeMap<String, String> {
+    let mut fields = BTreeMap::new();
+
+    let Ok(content) = std::fs::read_to_string(yaml_path) else {
+        return fields;
     };
-    entry.and_then(|e| e.enabled).unwrap_or(false)
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&content) else {
+        return fields;
+    };
+
+    let Some(claude) = value.as_mapping()
+        .and_then(|m| m.get(&serde_yaml::Value::String("claude".into())))
+        .and_then(serde_yaml::Value::as_mapping)
+    else {
+        return fields;
+    };
+
+    for (k, v) in claude {
+        if let Some(key) = k.as_str() {
+            let val = match v {
+                serde_yaml::Value::String(s) => s.clone(),
+                serde_yaml::Value::Bool(b) => b.to_string(),
+                serde_yaml::Value::Number(n) => n.to_string(),
+                _ => continue,
+            };
+            fields.insert(key.to_string(), val);
+        }
+    }
+
+    fields
 }
 
 // ─── Install Planning ───
@@ -85,16 +101,19 @@ pub fn plan_skill_install(
     default_scope: &str,
     config: &SidecarConfig,
 ) -> SkillInstallAction {
-    if !skill_enabled_for_provider(meta, provider) {
+    let allowed = config.provider_skills(provider.as_str());
+    if !allowed.iter().any(|s| s == &meta.name) {
         return SkillInstallAction::Skipped {
             skill_name: meta.name.clone(),
-            reason: format!("disabled for {}", provider.as_str()),
+            reason: format!("not in {} allowlist", provider.as_str()),
         };
     }
 
     match provider {
         Provider::Gemini => {
-            let scope = resolve_scope(meta, provider, default_scope, config);
+            let scope = config
+                .provider_skill_value(provider.as_str(), &meta.name, "scope")
+                .unwrap_or_else(|| default_scope.to_string());
             SkillInstallAction::GeminiCli {
                 skill_name: meta.name.clone(),
                 skill_dir: skill_dir.to_path_buf(),
@@ -105,32 +124,9 @@ pub fn plan_skill_install(
             skill_name: meta.name.clone(),
             src_dir: skill_dir.to_path_buf(),
             dst_dir: dst_dir.to_path_buf(),
+            claude_fields: meta.claude_fields.clone(),
         },
     }
-}
-
-fn resolve_scope(
-    meta: &SkillMeta,
-    provider: Provider,
-    default_scope: &str,
-    config: &SidecarConfig,
-) -> String {
-    if let Some(sidecar_scope) = config.skill_value(&meta.name, "scope") {
-        return sidecar_scope;
-    }
-
-    let provider_entry = match provider {
-        Provider::Claude => meta.providers.claude.as_ref(),
-        Provider::Gemini => meta.providers.gemini.as_ref(),
-        Provider::Codex => meta.providers.codex.as_ref(),
-    };
-    if let Some(entry) = provider_entry {
-        if let Some(ref scope) = entry.scope {
-            return scope.clone();
-        }
-    }
-
-    default_scope.to_string()
 }
 
 pub fn plan_skills_from_dir(
@@ -156,13 +152,9 @@ pub fn plan_skills_from_dir(
     let mut actions = Vec::new();
     for entry in skill_dirs {
         let path = entry.path();
-        let yaml_path = path.join("SKILL.yaml");
-        if !yaml_path.exists() {
+        let Some(meta) = extract_skill_meta(&path) else {
             continue;
-        }
-        let yaml_content = std::fs::read_to_string(&yaml_path)
-            .map_err(|e| format!("failed to read {}: {e}", yaml_path.display()))?;
-        let meta = parse_skill_yaml(&yaml_content)?;
+        };
         actions.push(plan_skill_install(
             &meta,
             &path,
@@ -175,6 +167,8 @@ pub fn plan_skills_from_dir(
 
     Ok(actions)
 }
+
+// ─── Skill Copy ───
 
 pub fn execute_skill_copy(src_dir: &Path, skill_name: &str, dst_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dst_dir)
@@ -214,7 +208,41 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-// ─── Skill Generation ───
+pub fn merge_claude_fields(skill_md: &str, fields: &BTreeMap<String, String>) -> String {
+    if fields.is_empty() {
+        return skill_md.to_string();
+    }
+
+    let Some((fm, body)) = parse::split_frontmatter(skill_md) else {
+        // No frontmatter — wrap body with new frontmatter
+        let mut out = String::from("---\n");
+        for (k, v) in fields {
+            let _ = writeln!(out, "{k}: {v}");
+        }
+        out.push_str("---\n");
+        out.push_str(skill_md);
+        return out;
+    };
+
+    let mut out = String::from("---\n");
+    out.push_str(fm);
+    if !fm.ends_with('\n') {
+        out.push('\n');
+    }
+    for (k, v) in fields {
+        // Only add if not already present in frontmatter
+        let key_prefix = format!("{k}:");
+        if !fm.lines().any(|line| line.starts_with(&key_prefix)) {
+            let _ = writeln!(out, "{k}: {v}");
+        }
+    }
+    out.push_str("---\n");
+    out.push_str(body);
+
+    out
+}
+
+// ─── Skill Generation (Codex wrappers) ───
 
 pub fn format_agent_skill_md(
     agent_name: &str,
@@ -323,6 +351,20 @@ pub fn generate_skills_from_agents_dir(agents_dir: &Path) -> Result<Vec<Generate
     }
 
     Ok(results)
+}
+
+// ─── Council roster helpers (used by validate module) ───
+
+pub fn get_council_roles(config: &SidecarConfig, council: &str) -> Vec<String> {
+    config
+        .skill_value(council, "roles")
+        .map(|s| {
+            s.lines()
+                .map(|l| l.trim().trim_start_matches("- ").to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

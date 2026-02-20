@@ -1,6 +1,7 @@
 use forge_lib::deploy::provider::Provider;
 use forge_lib::sidecar::SidecarConfig;
 use forge_lib::skill::{self, SkillInstallAction};
+use std::collections::BTreeMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -147,6 +148,7 @@ fn execute_action(action: &SkillInstallAction, dry_run: bool) -> Result<(), Stri
             skill_name,
             src_dir,
             dst_dir,
+            claude_fields,
         } => {
             if dry_run {
                 println!(
@@ -155,6 +157,14 @@ fn execute_action(action: &SkillInstallAction, dry_run: bool) -> Result<(), Stri
                 );
             } else {
                 skill::execute_skill_copy(src_dir, skill_name, dst_dir)?;
+                if !claude_fields.is_empty() {
+                    let md_path = dst_dir.join(skill_name).join("SKILL.md");
+                    if let Ok(content) = std::fs::read_to_string(&md_path) {
+                        let merged = skill::merge_claude_fields(&content, claude_fields);
+                        std::fs::write(&md_path, &merged)
+                            .map_err(|e| format!("failed to write {}: {e}", md_path.display()))?;
+                    }
+                }
                 println!("Installed skill: {skill_name} -> {}", dst_dir.display());
             }
         }
@@ -192,10 +202,10 @@ fn execute_action(action: &SkillInstallAction, dry_run: bool) -> Result<(), Stri
 
 fn generate_and_plan_wrappers(
     agents_dir: &Path,
-    provider: Provider,
+    _provider: Provider,
     dst_dir: &Path,
-    scope: &str,
-    config: &SidecarConfig,
+    _scope: &str,
+    _config: &SidecarConfig,
 ) -> Result<(Vec<SkillInstallAction>, Option<tempfile::TempDir>), String> {
     let generated = skill::generate_skills_from_agents_dir(agents_dir)?;
     if generated.is_empty() {
@@ -214,10 +224,12 @@ fn generate_and_plan_wrappers(
         std::fs::write(skill_dir.join("SKILL.yaml"), &gen.skill_yaml)
             .map_err(|e| format!("failed to write SKILL.yaml: {e}"))?;
 
-        let meta = skill::parse_skill_yaml(&gen.skill_yaml)?;
-        actions.push(skill::plan_skill_install(
-            &meta, &skill_dir, provider, dst_dir, scope, config,
-        ));
+        actions.push(SkillInstallAction::Copy {
+            skill_name: gen.agent_name.clone(),
+            src_dir: skill_dir,
+            dst_dir: dst_dir.to_path_buf(),
+            claude_fields: BTreeMap::new(),
+        });
     }
 
     Ok((actions, Some(tmp_dir)))

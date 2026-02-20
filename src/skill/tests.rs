@@ -3,200 +3,131 @@ use crate::sidecar::SidecarConfig;
 use std::fs;
 use tempfile::TempDir;
 
-// ─── Fixture: SKILL.yaml Parsing ───
-
-#[test]
-fn fixture_parse_skill_yaml_and_check_provider_enablement() {
-    // SKILL.yaml is standalone YAML (not markdown frontmatter). It defines
-    // a skill's metadata and per-provider enablement. The library parses it
-    // via serde, then checks provider flags to decide install actions.
-    let yaml = concat!(
-        "name: DeveloperCouncil\n",
-        "description: \"Multi-perspective code review\"\n",
-        "argument-hint: \"[task or PR reference]\"\n",
-        "providers:\n",
-        "  claude:\n",
-        "    enabled: true\n",
-        "  gemini:\n",
-        "    enabled: true\n",
-        "    scope: workspace\n",
-        "  codex:\n",
-        "    enabled: false\n",
-    );
-    let meta = parse_skill_yaml(yaml).unwrap();
-    assert_eq!(meta.name, "DeveloperCouncil");
-    assert_eq!(meta.description, "Multi-perspective code review");
-    assert_eq!(meta.argument_hint, "[task or PR reference]");
-
-    assert!(skill_enabled_for_provider(&meta, Provider::Claude));
-    assert!(skill_enabled_for_provider(&meta, Provider::Gemini));
-    assert!(!skill_enabled_for_provider(&meta, Provider::Codex));
+fn make_skill_dir(root: &Path, name: &str, md: &str, yaml: Option<&str>) -> PathBuf {
+    let dir = root.join(name);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("SKILL.md"), md).unwrap();
+    if let Some(y) = yaml {
+        fs::write(dir.join("SKILL.yaml"), y).unwrap();
+    }
+    dir
 }
 
-// ─── Fixture: Install Planning ───
-
-#[test]
-fn fixture_plan_install_across_providers() {
-    // The same skill produces different install actions per provider:
-    // Claude/Codex → Copy (directory copy), Gemini → GeminiCli (external CLI).
-    // Disabled providers → Skipped.
-    let yaml = concat!(
-        "name: Council\n",
-        "description: \"PAI council\"\n",
-        "argument-hint: \"[question]\"\n",
-        "providers:\n",
-        "  claude:\n",
-        "    enabled: true\n",
-        "  gemini:\n",
-        "    enabled: true\n",
-        "  codex:\n",
-        "    enabled: false\n",
-    );
-    let meta = parse_skill_yaml(yaml).unwrap();
-    let config = SidecarConfig::default();
-    let skill_dir = Path::new("/src/skills/Council");
-    let dst_dir = Path::new("/dst/skills");
-
-    let claude = plan_skill_install(
-        &meta,
-        skill_dir,
-        Provider::Claude,
-        dst_dir,
-        "workspace",
-        &config,
-    );
-    assert!(
-        matches!(claude, SkillInstallAction::Copy { ref skill_name, .. } if skill_name == "Council")
-    );
-
-    let gemini = plan_skill_install(
-        &meta,
-        skill_dir,
-        Provider::Gemini,
-        dst_dir,
-        "workspace",
-        &config,
-    );
-    assert!(
-        matches!(gemini, SkillInstallAction::GeminiCli { ref skill_name, ref scope, .. }
-        if skill_name == "Council" && scope == "workspace")
-    );
-
-    let codex = plan_skill_install(
-        &meta,
-        skill_dir,
-        Provider::Codex,
-        dst_dir,
-        "workspace",
-        &config,
-    );
-    assert!(matches!(codex, SkillInstallAction::Skipped { .. }));
+fn config_with_allowlist(dir: &Path, yaml: &str) -> SidecarConfig {
+    fs::write(dir.join("defaults.yaml"), yaml).unwrap();
+    SidecarConfig::load(dir)
 }
 
-// ─── Fixture: Skill Generation ───
+// ─── extract_skill_meta ───
 
 #[test]
-fn fixture_generate_codex_skill_wrapper_from_agent() {
-    // Agent .md files are converted into Codex-compatible skill wrappers.
-    // The wrapper includes SKILL.md (frontmatter + body) and SKILL.yaml
-    // (codex-only: claude=false, gemini=false, codex=true).
-    let agent_content = concat!(
-        "---\n",
-        "claude.name: SecurityArchitect\n",
-        "claude.description: \"Security specialist -- threat modeling\"\n",
-        "---\n",
-        "You are a security architect.\n",
+fn extract_meta_from_skill_md_only() {
+    let dir = TempDir::new().unwrap();
+    let skill = make_skill_dir(
+        dir.path(),
+        "Demo",
+        "---\nname: Demo\ndescription: A demo skill\n---\n# Demo\n",
+        None,
     );
-    let result = generate_skill_from_agent(agent_content, "SecurityArchitect.md").unwrap();
-    assert_eq!(result.agent_name, "SecurityArchitect");
-
-    assert!(result.skill_md.contains("name: SecurityArchitect"));
-    assert!(result.skill_md.contains("You are a security architect."));
-    assert!(result
-        .skill_md
-        .contains("Generated from agents/SecurityArchitect.md"));
-
-    assert!(result.skill_yaml.contains("name: SecurityArchitect"));
-    assert!(result.skill_yaml.contains("enabled: false"));
-    assert!(result.skill_yaml.contains("enabled: true"));
-    assert!(result.skill_yaml.contains("method: generated-from-agent"));
-    assert!(result.skill_yaml.contains("source: SecurityArchitect.md"));
-}
-
-// ─── parse_skill_yaml ───
-
-#[test]
-fn parse_minimal_yaml() {
-    let yaml = "name: Demo\ndescription: test\nargument-hint: hint\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
+    let meta = extract_skill_meta(&skill).unwrap();
     assert_eq!(meta.name, "Demo");
-    assert!(meta.providers.claude.is_none());
+    assert_eq!(meta.description, "A demo skill");
+    assert!(meta.claude_fields.is_empty());
 }
 
 #[test]
-fn parse_missing_name_fails() {
-    let yaml = "description: test\nargument-hint: hint\n";
-    assert!(parse_skill_yaml(yaml).is_err());
+fn extract_meta_with_claude_fields() {
+    let dir = TempDir::new().unwrap();
+    let skill = make_skill_dir(
+        dir.path(),
+        "WikiLink",
+        "---\nname: WikiLink\ndescription: Add wikilinks\n---\n# WikiLink\n",
+        Some("claude:\n    argument-hint: \"[path]\"\n"),
+    );
+    let meta = extract_skill_meta(&skill).unwrap();
+    assert_eq!(meta.name, "WikiLink");
+    assert_eq!(
+        meta.claude_fields.get("argument-hint"),
+        Some(&"[path]".to_string())
+    );
 }
 
 #[test]
-fn parse_missing_description_fails() {
-    let yaml = "name: Demo\nargument-hint: hint\n";
-    assert!(parse_skill_yaml(yaml).is_err());
+fn extract_meta_with_bool_claude_field() {
+    let dir = TempDir::new().unwrap();
+    let skill = make_skill_dir(
+        dir.path(),
+        "Hidden",
+        "---\nname: Hidden\ndescription: Hidden skill\n---\n",
+        Some("claude:\n    disable-model-invocation: true\n"),
+    );
+    let meta = extract_skill_meta(&skill).unwrap();
+    assert_eq!(
+        meta.claude_fields.get("disable-model-invocation"),
+        Some(&"true".to_string())
+    );
 }
 
 #[test]
-fn parse_missing_argument_hint_fails() {
-    let yaml = "name: Demo\ndescription: test\n";
-    assert!(parse_skill_yaml(yaml).is_err());
+fn extract_meta_missing_name_returns_none() {
+    let dir = TempDir::new().unwrap();
+    let skill = make_skill_dir(
+        dir.path(),
+        "NoName",
+        "---\ndescription: No name\n---\n",
+        None,
+    );
+    assert!(extract_skill_meta(&skill).is_none());
 }
 
 #[test]
-fn parse_invalid_yaml_fails() {
-    assert!(parse_skill_yaml("{{{{ not yaml").is_err());
-}
-
-// ─── skill_enabled_for_provider ───
-
-#[test]
-fn enabled_true_bool() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    enabled: true\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    assert!(skill_enabled_for_provider(&meta, Provider::Claude));
+fn extract_meta_no_skill_md_returns_none() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("Empty");
+    fs::create_dir_all(&path).unwrap();
+    assert!(extract_skill_meta(&path).is_none());
 }
 
 #[test]
-fn enabled_false_bool() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    enabled: false\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    assert!(!skill_enabled_for_provider(&meta, Provider::Claude));
+fn extract_meta_yaml_without_claude_key() {
+    let dir = TempDir::new().unwrap();
+    let skill = make_skill_dir(
+        dir.path(),
+        "Old",
+        "---\nname: Old\ndescription: Old format\n---\n",
+        Some("providers:\n  claude:\n    enabled: true\n"),
+    );
+    let meta = extract_skill_meta(&skill).unwrap();
+    assert!(meta.claude_fields.is_empty());
 }
 
 #[test]
-fn enabled_missing_provider_section() {
-    let yaml = "name: X\ndescription: d\nargument-hint: h\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    assert!(!skill_enabled_for_provider(&meta, Provider::Claude));
-}
-
-#[test]
-fn enabled_missing_enabled_field() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    scope: user\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    assert!(!skill_enabled_for_provider(&meta, Provider::Claude));
+fn extract_meta_corrupt_yaml_ignored() {
+    let dir = TempDir::new().unwrap();
+    let skill = make_skill_dir(
+        dir.path(),
+        "Bad",
+        "---\nname: Bad\ndescription: Bad yaml\n---\n",
+        Some("{{{{ invalid yaml !!!!"),
+    );
+    let meta = extract_skill_meta(&skill).unwrap();
+    assert!(meta.claude_fields.is_empty());
 }
 
 // ─── plan_skill_install ───
 
 #[test]
-fn plan_copy_for_claude() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    enabled: true\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    let config = SidecarConfig::default();
+fn plan_copy_when_in_allowlist() {
+    let dir = TempDir::new().unwrap();
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    claude:\n        Demo:\n",
+    );
+    let meta = SkillMeta {
+        name: "Demo".into(),
+        description: "d".into(),
+        claude_fields: BTreeMap::new(),
+    };
     let action = plan_skill_install(
         &meta,
         Path::new("/src"),
@@ -205,49 +136,21 @@ fn plan_copy_for_claude() {
         "workspace",
         &config,
     );
-    assert!(matches!(action, SkillInstallAction::Copy { .. }));
+    assert!(matches!(action, SkillInstallAction::Copy { ref skill_name, .. } if skill_name == "Demo"));
 }
 
 #[test]
-fn plan_copy_for_codex() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  codex:\n    enabled: true\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    let config = SidecarConfig::default();
-    let action = plan_skill_install(
-        &meta,
-        Path::new("/src"),
-        Provider::Codex,
-        Path::new("/dst"),
-        "workspace",
-        &config,
+fn plan_skipped_when_not_in_allowlist() {
+    let dir = TempDir::new().unwrap();
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    claude:\n        Other:\n",
     );
-    assert!(matches!(action, SkillInstallAction::Copy { .. }));
-}
-
-#[test]
-fn plan_gemini_returns_cli_action() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  gemini:\n    enabled: true\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    let config = SidecarConfig::default();
-    let action = plan_skill_install(
-        &meta,
-        Path::new("/src"),
-        Provider::Gemini,
-        Path::new("/dst"),
-        "user",
-        &config,
-    );
-    assert!(matches!(action, SkillInstallAction::GeminiCli { ref scope, .. } if scope == "user"));
-}
-
-#[test]
-fn plan_disabled_provider_skipped() {
-    let yaml =
-        "name: X\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    enabled: false\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    let config = SidecarConfig::default();
+    let meta = SkillMeta {
+        name: "Demo".into(),
+        description: "d".into(),
+        claude_fields: BTreeMap::new(),
+    };
     let action = plan_skill_install(
         &meta,
         Path::new("/src"),
@@ -260,70 +163,131 @@ fn plan_disabled_provider_skipped() {
 }
 
 #[test]
-fn plan_scope_precedence_sidecar_wins() {
-    let dir = TempDir::new().unwrap();
-    fs::write(
-        dir.path().join("defaults.yaml"),
-        "Council:\n  scope: user\n",
-    )
-    .unwrap();
-    let config = SidecarConfig::load(dir.path());
+fn plan_skipped_when_empty_allowlist() {
+    let config = SidecarConfig::default();
+    let meta = SkillMeta {
+        name: "Demo".into(),
+        description: "d".into(),
+        claude_fields: BTreeMap::new(),
+    };
+    let action = plan_skill_install(
+        &meta,
+        Path::new("/src"),
+        Provider::Claude,
+        Path::new("/dst"),
+        "workspace",
+        &config,
+    );
+    assert!(matches!(action, SkillInstallAction::Skipped { .. }));
+}
 
-    let yaml = "name: Council\ndescription: d\nargument-hint: h\nproviders:\n  gemini:\n    enabled: true\n    scope: workspace\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
+#[test]
+fn plan_gemini_returns_cli_action() {
+    let dir = TempDir::new().unwrap();
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    gemini:\n        Demo:\n",
+    );
+    let meta = SkillMeta {
+        name: "Demo".into(),
+        description: "d".into(),
+        claude_fields: BTreeMap::new(),
+    };
     let action = plan_skill_install(
         &meta,
         Path::new("/src"),
         Provider::Gemini,
         Path::new("/dst"),
-        "default",
+        "user",
         &config,
     );
     assert!(matches!(action, SkillInstallAction::GeminiCli { ref scope, .. } if scope == "user"));
 }
 
 #[test]
-fn plan_scope_precedence_yaml_over_default() {
-    let yaml = "name: X\ndescription: d\nargument-hint: h\nproviders:\n  gemini:\n    enabled: true\n    scope: user\n";
-    let meta = parse_skill_yaml(yaml).unwrap();
-    let config = SidecarConfig::default();
+fn plan_gemini_scope_from_config() {
+    let dir = TempDir::new().unwrap();
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    gemini:\n        Demo:\n            scope: workspace\n",
+    );
+    let meta = SkillMeta {
+        name: "Demo".into(),
+        description: "d".into(),
+        claude_fields: BTreeMap::new(),
+    };
     let action = plan_skill_install(
         &meta,
         Path::new("/src"),
         Provider::Gemini,
         Path::new("/dst"),
+        "user",
+        &config,
+    );
+    assert!(matches!(action, SkillInstallAction::GeminiCli { ref scope, .. } if scope == "workspace"));
+}
+
+#[test]
+fn plan_copy_carries_claude_fields() {
+    let dir = TempDir::new().unwrap();
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    claude:\n        WikiLink:\n",
+    );
+    let mut fields = BTreeMap::new();
+    fields.insert("argument-hint".into(), "[path]".into());
+    let meta = SkillMeta {
+        name: "WikiLink".into(),
+        description: "d".into(),
+        claude_fields: fields,
+    };
+    let action = plan_skill_install(
+        &meta,
+        Path::new("/src"),
+        Provider::Claude,
+        Path::new("/dst"),
         "workspace",
         &config,
     );
-    assert!(matches!(action, SkillInstallAction::GeminiCli { ref scope, .. } if scope == "user"));
+    match action {
+        SkillInstallAction::Copy { ref claude_fields, .. } => {
+            assert_eq!(claude_fields.get("argument-hint"), Some(&"[path]".to_string()));
+        }
+        _ => panic!("expected Copy"),
+    }
 }
 
 // ─── plan_skills_from_dir ───
 
 #[test]
-fn plan_skills_from_dir_multiple_skills() {
+fn plan_from_dir_with_allowlist() {
     let dir = TempDir::new().unwrap();
     let root = dir.path().join("skills");
 
-    let skill_a = root.join("Alpha");
-    fs::create_dir_all(&skill_a).unwrap();
-    fs::write(skill_a.join("SKILL.md"), "# Alpha").unwrap();
-    fs::write(
-        skill_a.join("SKILL.yaml"),
-        "name: Alpha\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    enabled: true\n",
-    )
-    .unwrap();
+    make_skill_dir(
+        &root,
+        "Alpha",
+        "---\nname: Alpha\ndescription: first\n---\n# Alpha\n",
+        None,
+    );
+    make_skill_dir(
+        &root,
+        "Beta",
+        "---\nname: Beta\ndescription: second\n---\n# Beta\n",
+        None,
+    );
+    make_skill_dir(
+        &root,
+        "Gamma",
+        "---\nname: Gamma\ndescription: third\n---\n# Gamma\n",
+        None,
+    );
 
-    let skill_b = root.join("Beta");
-    fs::create_dir_all(&skill_b).unwrap();
-    fs::write(skill_b.join("SKILL.md"), "# Beta").unwrap();
-    fs::write(
-        skill_b.join("SKILL.yaml"),
-        "name: Beta\ndescription: d\nargument-hint: h\nproviders:\n  claude:\n    enabled: true\n",
-    )
-    .unwrap();
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    claude:\n        Alpha:\n        Gamma:\n",
+    );
 
-    let config = SidecarConfig::default();
     let actions = plan_skills_from_dir(
         &root,
         Provider::Claude,
@@ -332,17 +296,57 @@ fn plan_skills_from_dir_multiple_skills() {
         &config,
     )
     .unwrap();
-    assert_eq!(actions.len(), 2);
-    assert!(
-        matches!(&actions[0], SkillInstallAction::Copy { skill_name, .. } if skill_name == "Alpha")
-    );
-    assert!(
-        matches!(&actions[1], SkillInstallAction::Copy { skill_name, .. } if skill_name == "Beta")
-    );
+
+    let copy_names: Vec<&str> = actions
+        .iter()
+        .filter_map(|a| match a {
+            SkillInstallAction::Copy { skill_name, .. } => Some(skill_name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copy_names, vec!["Alpha", "Gamma"]);
+
+    let skipped: Vec<&str> = actions
+        .iter()
+        .filter_map(|a| match a {
+            SkillInstallAction::Skipped { skill_name, .. } => Some(skill_name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(skipped, vec!["Beta"]);
 }
 
 #[test]
-fn plan_skills_from_dir_empty() {
+fn plan_from_dir_no_skill_yaml_needed() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("skills");
+    make_skill_dir(
+        &root,
+        "Simple",
+        "---\nname: Simple\ndescription: A simple skill\n---\n# Simple\n",
+        None,
+    );
+
+    let config = config_with_allowlist(
+        dir.path(),
+        "skills:\n    claude:\n        Simple:\n",
+    );
+
+    let actions = plan_skills_from_dir(
+        &root,
+        Provider::Claude,
+        Path::new("/dst"),
+        "workspace",
+        &config,
+    )
+    .unwrap();
+
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(&actions[0], SkillInstallAction::Copy { skill_name, .. } if skill_name == "Simple"));
+}
+
+#[test]
+fn plan_from_dir_empty() {
     let dir = TempDir::new().unwrap();
     let config = SidecarConfig::default();
     let actions = plan_skills_from_dir(
@@ -357,7 +361,7 @@ fn plan_skills_from_dir_empty() {
 }
 
 #[test]
-fn plan_skills_from_dir_missing_returns_empty() {
+fn plan_from_dir_missing_returns_empty() {
     let config = SidecarConfig::default();
     let actions = plan_skills_from_dir(
         Path::new("/nonexistent"),
@@ -370,6 +374,58 @@ fn plan_skills_from_dir_missing_returns_empty() {
     assert!(actions.is_empty());
 }
 
+// ─── merge_claude_fields ───
+
+#[test]
+fn merge_empty_fields_returns_original() {
+    let md = "---\nname: Demo\ndescription: d\n---\n# Demo\n";
+    let result = merge_claude_fields(md, &BTreeMap::new());
+    assert_eq!(result, md);
+}
+
+#[test]
+fn merge_adds_fields_to_frontmatter() {
+    let md = "---\nname: Demo\ndescription: d\n---\n# Demo\n";
+    let mut fields = BTreeMap::new();
+    fields.insert("argument-hint".into(), "[path]".into());
+    let result = merge_claude_fields(md, &fields);
+    assert!(result.contains("argument-hint: [path]"));
+    assert!(result.contains("name: Demo"));
+    assert!(result.contains("# Demo"));
+}
+
+#[test]
+fn merge_does_not_duplicate_existing_fields() {
+    let md = "---\nname: Demo\ndescription: d\nargument-hint: existing\n---\n# Demo\n";
+    let mut fields = BTreeMap::new();
+    fields.insert("argument-hint".into(), "[path]".into());
+    let result = merge_claude_fields(md, &fields);
+    assert_eq!(result.matches("argument-hint").count(), 1);
+    assert!(result.contains("argument-hint: existing"));
+}
+
+#[test]
+fn merge_multiple_fields() {
+    let md = "---\nname: Demo\ndescription: d\n---\n# Demo\n";
+    let mut fields = BTreeMap::new();
+    fields.insert("argument-hint".into(), "[args]".into());
+    fields.insert("disable-model-invocation".into(), "true".into());
+    let result = merge_claude_fields(md, &fields);
+    assert!(result.contains("argument-hint: [args]"));
+    assert!(result.contains("disable-model-invocation: true"));
+}
+
+#[test]
+fn merge_no_frontmatter_wraps() {
+    let md = "# Demo\nSome content\n";
+    let mut fields = BTreeMap::new();
+    fields.insert("argument-hint".into(), "[args]".into());
+    let result = merge_claude_fields(md, &fields);
+    assert!(result.starts_with("---\n"));
+    assert!(result.contains("argument-hint: [args]"));
+    assert!(result.contains("# Demo"));
+}
+
 // ─── execute_skill_copy ───
 
 #[test]
@@ -378,13 +434,13 @@ fn execute_copy_creates_and_copies() {
     let src = dir.path().join("src_skill");
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("SKILL.md"), "# Test").unwrap();
-    fs::write(src.join("SKILL.yaml"), "name: Test").unwrap();
+    fs::write(src.join("helper.sh"), "#!/bin/bash").unwrap();
 
     let dst = dir.path().join("dst");
     execute_skill_copy(&src, "TestSkill", &dst).unwrap();
 
     assert!(dst.join("TestSkill").join("SKILL.md").exists());
-    assert!(dst.join("TestSkill").join("SKILL.yaml").exists());
+    assert!(dst.join("TestSkill").join("helper.sh").exists());
 }
 
 #[test]
@@ -404,7 +460,7 @@ fn execute_copy_replaces_existing() {
     assert_eq!(content, "# New");
 }
 
-// ─── generate_skill_from_agent ───
+// ─── Skill Generation (Codex wrappers) ───
 
 #[test]
 fn generate_uses_claude_name() {
@@ -434,8 +490,6 @@ fn generate_default_description() {
     assert!(result.skill_yaml.contains("Specialist skill"));
 }
 
-// ─── generate_skills_from_agents_dir ───
-
 #[test]
 fn generate_from_agents_dir() {
     let dir = TempDir::new().unwrap();
@@ -464,8 +518,6 @@ fn generate_from_missing_dir() {
     assert!(results.is_empty());
 }
 
-// ─── format_agent_skill_md ───
-
 #[test]
 fn format_skill_md_structure() {
     let md = format_agent_skill_md("Agent", "A specialist", "Do things.\n", "Agent.md");
@@ -477,13 +529,10 @@ fn format_skill_md_structure() {
     assert!(md.contains("Do things."));
 }
 
-// ─── format_agent_skill_yaml ───
-
 #[test]
 fn format_skill_yaml_codex_only() {
     let yaml = format_agent_skill_yaml("Agent", "A specialist", "Agent.md");
     assert!(yaml.contains("name: Agent"));
-    // Claude and Gemini disabled
     let lines: Vec<&str> = yaml.lines().collect();
     let claude_enabled = lines.iter().position(|l| l.contains("claude:")).unwrap();
     assert!(lines[claude_enabled + 1].contains("enabled: false"));
