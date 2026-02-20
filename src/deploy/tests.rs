@@ -45,6 +45,14 @@ fn format_name_codex_identity() {
 }
 
 #[test]
+fn format_name_opencode_kebab() {
+    assert_eq!(
+        Provider::OpenCode.format_name("DocumentationWriter"),
+        "documentation-writer"
+    );
+}
+
+#[test]
 fn format_name_gemini_pascal_case() {
     assert_eq!(
         Provider::Gemini.format_name("DocumentationWriter"),
@@ -108,6 +116,11 @@ fn from_str_codex() {
 }
 
 #[test]
+fn from_str_opencode() {
+    assert_eq!(Provider::from_str("opencode"), Some(Provider::OpenCode));
+}
+
+#[test]
 fn from_str_invalid() {
     assert_eq!(Provider::from_str("openai"), None);
 }
@@ -127,6 +140,14 @@ fn from_path_codex() {
     assert_eq!(
         Provider::from_path(Path::new("/home/.codex/agents")),
         Provider::Codex
+    );
+}
+
+#[test]
+fn from_path_opencode() {
+    assert_eq!(
+        Provider::from_path(Path::new("/home/.opencode/agents")),
+        Provider::OpenCode
     );
 }
 
@@ -185,6 +206,12 @@ fn map_tool_claude_identity() {
     assert_eq!(Provider::Claude.map_tool("Read"), "Read");
 }
 
+#[test]
+fn map_tool_opencode_identity() {
+    assert_eq!(Provider::OpenCode.map_tool("Read"), "Read");
+    assert_eq!(Provider::OpenCode.map_tool("Bash"), "Bash");
+}
+
 // ─── Provider: map_tools ───
 
 #[test]
@@ -220,6 +247,11 @@ fn agent_extension_gemini_md() {
     assert_eq!(Provider::Gemini.agent_extension(), "md");
 }
 
+#[test]
+fn agent_extension_opencode_md() {
+    assert_eq!(Provider::OpenCode.agent_extension(), "md");
+}
+
 // ─── Provider: as_str ───
 
 #[test]
@@ -227,6 +259,7 @@ fn as_str_roundtrip() {
     assert_eq!(Provider::Claude.as_str(), "claude");
     assert_eq!(Provider::Gemini.as_str(), "gemini");
     assert_eq!(Provider::Codex.as_str(), "codex");
+    assert_eq!(Provider::OpenCode.as_str(), "opencode");
 }
 
 // ─── Deploy Fixture ───
@@ -1170,36 +1203,51 @@ fn deploy_overwrite_new_format_source() {
 
 // ─── scope_dirs ───
 
+fn default_providers() -> Vec<String> {
+    vec![
+        "claude".into(),
+        "gemini".into(),
+        "codex".into(),
+        "opencode".into(),
+    ]
+}
+
 #[test]
 fn scope_user() {
     let home = Path::new("/home/user");
-    let dirs = scope_dirs("user", home).unwrap();
-    assert_eq!(dirs.len(), 3);
+    let providers = default_providers();
+    let dirs = scope_dirs("user", home, &providers).unwrap();
+    assert_eq!(dirs.len(), 4);
     assert_eq!(dirs[0], home.join(".claude/agents"));
     assert_eq!(dirs[1], home.join(".gemini/agents"));
     assert_eq!(dirs[2], home.join(".codex/agents"));
+    assert_eq!(dirs[3], home.join(".opencode/agents"));
 }
 
 #[test]
 fn scope_workspace() {
     let home = Path::new("/home/user");
-    let dirs = scope_dirs("workspace", home).unwrap();
-    assert_eq!(dirs.len(), 3);
+    let providers = default_providers();
+    let dirs = scope_dirs("workspace", home, &providers).unwrap();
+    assert_eq!(dirs.len(), 4);
     assert_eq!(dirs[0], PathBuf::from(".claude/agents"));
+    assert_eq!(dirs[3], PathBuf::from(".opencode/agents"));
 }
 
 #[test]
 fn scope_all() {
     let home = Path::new("/home/user");
-    let dirs = scope_dirs("all", home).unwrap();
-    assert_eq!(dirs.len(), 6);
+    let providers = default_providers();
+    let dirs = scope_dirs("all", home, &providers).unwrap();
+    assert_eq!(dirs.len(), 8);
 }
 
 #[test]
 fn scope_project() {
     let home = Path::new("/home/user");
-    let dirs = scope_dirs("project", home).unwrap();
-    assert_eq!(dirs.len(), 3);
+    let providers = default_providers();
+    let dirs = scope_dirs("project", home, &providers).unwrap();
+    assert_eq!(dirs.len(), 4);
     // Project key is CWD with / replaced by -
     let key = std::env::current_dir()
         .unwrap()
@@ -1208,11 +1256,26 @@ fn scope_project() {
     assert_eq!(dirs[0], home.join(format!(".claude/projects/{key}/agents")));
     assert_eq!(dirs[1], home.join(format!(".gemini/projects/{key}/agents")));
     assert_eq!(dirs[2], home.join(format!(".codex/projects/{key}/agents")));
+    assert_eq!(
+        dirs[3],
+        home.join(format!(".opencode/projects/{key}/agents"))
+    );
+}
+
+#[test]
+fn scope_subset_providers() {
+    let home = Path::new("/home/user");
+    let providers = vec!["claude".into(), "gemini".into()];
+    let dirs = scope_dirs("user", home, &providers).unwrap();
+    assert_eq!(dirs.len(), 2);
+    assert_eq!(dirs[0], home.join(".claude/agents"));
+    assert_eq!(dirs[1], home.join(".gemini/agents"));
 }
 
 #[test]
 fn scope_invalid() {
-    assert!(scope_dirs("bogus", Path::new("/tmp")).is_err());
+    let providers = default_providers();
+    assert!(scope_dirs("bogus", Path::new("/tmp"), &providers).is_err());
 }
 
 // ─── toml_escape ───

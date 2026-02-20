@@ -5,6 +5,7 @@ pub enum Provider {
     Claude,
     Gemini,
     Codex,
+    OpenCode,
 }
 
 impl Provider {
@@ -14,6 +15,7 @@ impl Provider {
             "claude" => Some(Self::Claude),
             "gemini" => Some(Self::Gemini),
             "codex" => Some(Self::Codex),
+            "opencode" => Some(Self::OpenCode),
             _ => None,
         }
     }
@@ -24,6 +26,8 @@ impl Provider {
             Self::Gemini
         } else if path_str.contains(".codex") {
             Self::Codex
+        } else if path_str.contains(".opencode") {
+            Self::OpenCode
         } else {
             Self::Claude
         }
@@ -31,14 +35,14 @@ impl Provider {
 
     pub fn format_name(&self, name: &str) -> String {
         match self {
-            Self::Gemini => to_kebab_case(name),
+            Self::Gemini | Self::OpenCode => to_kebab_case(name),
             Self::Claude | Self::Codex => name.to_string(),
         }
     }
 
     pub fn map_tool(&self, tool: &str) -> String {
         match self {
-            Self::Claude | Self::Codex => tool.to_string(),
+            Self::Claude | Self::Codex | Self::OpenCode => tool.to_string(),
             Self::Gemini => match tool.to_ascii_lowercase().as_str() {
                 "read" => "read_file".to_string(),
                 "write" => "write_file".to_string(),
@@ -66,7 +70,7 @@ impl Provider {
     pub fn agent_extension(&self) -> &'static str {
         match self {
             Self::Codex => "toml",
-            Self::Claude | Self::Gemini => "md",
+            Self::Claude | Self::Gemini | Self::OpenCode => "md",
         }
     }
 
@@ -75,6 +79,7 @@ impl Provider {
             Self::Claude => "claude",
             Self::Gemini => "gemini",
             Self::Codex => "codex",
+            Self::OpenCode => "opencode",
         }
     }
 }

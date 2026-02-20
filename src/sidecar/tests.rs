@@ -527,6 +527,54 @@ fn reasoning_effort_flat_fallback() {
     );
 }
 
+// --- providers ---
+
+#[test]
+fn providers_reads_keys_from_providers_section() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "providers:\n  claude:\n    fast: sonnet\n  gemini:\n    fast: flash\n  codex:\n    fast: mini\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let providers = config.providers();
+    assert_eq!(providers.len(), 3);
+    assert!(providers.contains(&"claude".to_string()));
+    assert!(providers.contains(&"gemini".to_string()));
+    assert!(providers.contains(&"codex".to_string()));
+}
+
+#[test]
+fn providers_includes_opencode() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "providers:\n  claude:\n    fast: sonnet\n  opencode:\n    fast: sonnet\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let providers = config.providers();
+    assert_eq!(providers.len(), 2);
+    assert!(providers.contains(&"opencode".to_string()));
+}
+
+#[test]
+fn providers_defaults_to_claude_when_missing() {
+    let config = SidecarConfig::default();
+    let providers = config.providers();
+    assert_eq!(providers, vec!["claude"]);
+}
+
+#[test]
+fn providers_empty_config_defaults_to_claude() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(dir.path(), "defaults.yaml", "agents:\n  Foo:\n");
+    let config = SidecarConfig::load(dir.path());
+    let providers = config.providers();
+    assert_eq!(providers, vec!["claude"]);
+}
+
 // --- provider_skills ---
 
 #[test]

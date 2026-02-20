@@ -120,7 +120,7 @@ pub fn plan_skill_install(
                 scope,
             }
         }
-        Provider::Claude | Provider::Codex => SkillInstallAction::Copy {
+        Provider::Claude | Provider::Codex | Provider::OpenCode => SkillInstallAction::Copy {
             skill_name: meta.name.clone(),
             src_dir: skill_dir.to_path_buf(),
             dst_dir: dst_dir.to_path_buf(),

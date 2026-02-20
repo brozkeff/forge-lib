@@ -73,7 +73,7 @@ fn parse_args() -> Result<Args, ExitCode> {
             "--include-agent-wrappers" => include_agent_wrappers = true,
             "-h" | "--help" => {
                 println!(
-                    "Usage: install-skills <skills-dir> --provider claude|gemini|codex \
+                    "Usage: install-skills <skills-dir> --provider claude|gemini|codex|opencode \
                      [--scope user|workspace] [--dry-run] [--clean] [--dst <path>] \
                      [--agents-dir <path>] [--include-agent-wrappers]"
                 );
@@ -93,7 +93,7 @@ fn parse_args() -> Result<Args, ExitCode> {
     let Some(skills_dir) = skills_dir else {
         eprintln!("Error: skills directory required.");
         eprintln!(
-            "Usage: install-skills <skills-dir> --provider claude|gemini|codex \
+            "Usage: install-skills <skills-dir> --provider claude|gemini|codex|opencode \
              [--scope user|workspace] [--dry-run] [--clean] [--dst <path>]"
         );
         return Err(ExitCode::from(1));
@@ -105,7 +105,7 @@ fn parse_args() -> Result<Args, ExitCode> {
     };
 
     let Some(provider) = Provider::from_str(prov) else {
-        eprintln!("Error: invalid provider {prov:?}: use claude, gemini, or codex");
+        eprintln!("Error: invalid provider {prov:?}: use claude, gemini, codex, or opencode");
         return Err(ExitCode::from(1));
     };
 
@@ -134,11 +134,7 @@ fn project_key() -> Result<String, String> {
 
 fn resolve_dst(provider: Provider, scope: &str) -> Result<PathBuf, String> {
     let home = env::var("HOME").unwrap_or_default();
-    let provider_dir = match provider {
-        Provider::Claude => ".claude",
-        Provider::Gemini => ".gemini",
-        Provider::Codex => ".codex",
-    };
+    let provider_dir = format!(".{}", provider.as_str());
 
     match scope {
         "user" => Ok(PathBuf::from(format!("{home}/{provider_dir}/skills"))),

@@ -84,7 +84,10 @@ fn main() -> ExitCode {
             }
         }
         if warnings.failed() > 0 {
-            println!("\n  ({} warnings — not counted as failures)", warnings.failed());
+            println!(
+                "\n  ({} warnings — not counted as failures)",
+                warnings.failed()
+            );
         }
         println!();
     }

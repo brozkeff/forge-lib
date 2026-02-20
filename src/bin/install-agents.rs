@@ -170,7 +170,8 @@ fn run(args: &Args) -> ExitCode {
         vec![PathBuf::from(dst)]
     } else {
         let home = env::var("HOME").unwrap_or_default();
-        match deploy::scope_dirs(&args.scope, Path::new(&home)) {
+        let providers = config.providers();
+        match deploy::scope_dirs(&args.scope, Path::new(&home), &providers) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Error: {e}");

@@ -110,6 +110,18 @@ impl SidecarConfig {
         normalize_value(val)
     }
 
+    pub fn providers(&self) -> Vec<String> {
+        navigate(&self.raw, &["providers"])
+            .and_then(|v| {
+                v.as_mapping().map(|m| {
+                    m.keys()
+                        .filter_map(|k| k.as_str().map(String::from))
+                        .collect()
+                })
+            })
+            .unwrap_or_else(|| vec!["claude".into()])
+    }
+
     pub fn global_tiers(&self) -> ModelTiers {
         let shared =
             navigate(&self.raw, &["shared", "models"]).or_else(|| navigate(&self.raw, &["models"]));

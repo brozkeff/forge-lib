@@ -83,7 +83,7 @@ pub fn format_agent_output(
                 }
             }
         }
-        Provider::Claude => {
+        Provider::Claude | Provider::OpenCode => {
             out.push_str("---\n");
             let _ = writeln!(out, "name: {}", meta.display_name);
             let _ = writeln!(out, "description: {}", meta.description);
@@ -362,28 +362,25 @@ fn project_key() -> Result<String, String> {
     Ok(cwd.to_string_lossy().replace('/', "-"))
 }
 
-pub fn scope_dirs(scope: &str, home: &Path) -> Result<Vec<PathBuf>, String> {
-    let user_dirs = vec![
-        home.join(".claude/agents"),
-        home.join(".gemini/agents"),
-        home.join(".codex/agents"),
-    ];
-    let workspace_dirs = vec![
-        PathBuf::from(".claude/agents"),
-        PathBuf::from(".gemini/agents"),
-        PathBuf::from(".codex/agents"),
-    ];
+pub fn scope_dirs(scope: &str, home: &Path, providers: &[String]) -> Result<Vec<PathBuf>, String> {
+    let user_dirs: Vec<PathBuf> = providers
+        .iter()
+        .map(|p| home.join(format!(".{p}/agents")))
+        .collect();
+    let workspace_dirs: Vec<PathBuf> = providers
+        .iter()
+        .map(|p| PathBuf::from(format!(".{p}/agents")))
+        .collect();
 
     match scope {
         "user" => Ok(user_dirs),
         "workspace" => Ok(workspace_dirs),
         "project" => {
             let key = project_key()?;
-            Ok(vec![
-                home.join(format!(".claude/projects/{key}/agents")),
-                home.join(format!(".gemini/projects/{key}/agents")),
-                home.join(format!(".codex/projects/{key}/agents")),
-            ])
+            Ok(providers
+                .iter()
+                .map(|p| home.join(format!(".{p}/projects/{key}/agents")))
+                .collect())
         }
         "all" => {
             let mut all = user_dirs;
