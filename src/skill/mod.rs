@@ -47,8 +47,7 @@ pub fn extract_skill_meta(skill_dir: &Path) -> Option<SkillMeta> {
     let content = std::fs::read_to_string(&md_path).ok()?;
 
     let name = parse::fm_value(&content, "name").filter(|n| !n.is_empty())?;
-    let description = parse::fm_value(&content, "description")
-        .unwrap_or_else(|| "Skill".into());
+    let description = parse::fm_value(&content, "description").unwrap_or_else(|| "Skill".into());
 
     let claude_fields = read_claude_fields(&skill_dir.join("SKILL.yaml"));
 
@@ -69,8 +68,9 @@ fn read_claude_fields(yaml_path: &Path) -> BTreeMap<String, String> {
         return fields;
     };
 
-    let Some(claude) = value.as_mapping()
-        .and_then(|m| m.get(&serde_yaml::Value::String("claude".into())))
+    let Some(claude) = value
+        .as_mapping()
+        .and_then(|m| m.get(serde_yaml::Value::String("claude".into())))
         .and_then(serde_yaml::Value::as_mapping)
     else {
         return fields;
@@ -175,6 +175,9 @@ pub fn execute_skill_copy(src_dir: &Path, skill_name: &str, dst_dir: &Path) -> R
         .map_err(|e| format!("failed to create {}: {e}", dst_dir.display()))?;
 
     let target = dst_dir.join(skill_name);
+    if target.is_symlink() {
+        return Err(format!("destination is a symlink: {}", target.display()));
+    }
     if target.exists() {
         std::fs::remove_dir_all(&target)
             .map_err(|e| format!("failed to remove {}: {e}", target.display()))?;
@@ -244,6 +247,39 @@ pub fn merge_claude_fields(skill_md: &str, fields: &BTreeMap<String, String>) ->
     out.push_str(body);
 
     out
+}
+
+// ─── Orphan Cleanup ───
+
+pub fn clean_orphaned_skills(
+    dst_dir: &Path,
+    module_name: &str,
+    current_skills: &[String],
+    dry_run: bool,
+) -> Result<Vec<String>, String> {
+    if module_name.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let previous = crate::manifest::read(dst_dir, module_name);
+    let mut removed = Vec::new();
+
+    for name in &previous {
+        if current_skills.contains(name) {
+            continue;
+        }
+        let path = dst_dir.join(name);
+        if !path.is_dir() {
+            continue;
+        }
+        if !dry_run {
+            std::fs::remove_dir_all(&path)
+                .map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
+        }
+        removed.push(name.clone());
+    }
+
+    Ok(removed)
 }
 
 // ─── Skill Generation (Codex wrappers) ───

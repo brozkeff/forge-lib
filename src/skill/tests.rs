@@ -119,10 +119,7 @@ fn extract_meta_corrupt_yaml_ignored() {
 #[test]
 fn plan_copy_when_in_allowlist() {
     let dir = TempDir::new().unwrap();
-    let config = config_with_allowlist(
-        dir.path(),
-        "skills:\n    claude:\n        Demo:\n",
-    );
+    let config = config_with_allowlist(dir.path(), "skills:\n    claude:\n        Demo:\n");
     let meta = SkillMeta {
         name: "Demo".into(),
         description: "d".into(),
@@ -136,16 +133,15 @@ fn plan_copy_when_in_allowlist() {
         "workspace",
         &config,
     );
-    assert!(matches!(action, SkillInstallAction::Copy { ref skill_name, .. } if skill_name == "Demo"));
+    assert!(
+        matches!(action, SkillInstallAction::Copy { ref skill_name, .. } if skill_name == "Demo")
+    );
 }
 
 #[test]
 fn plan_skipped_when_not_in_allowlist() {
     let dir = TempDir::new().unwrap();
-    let config = config_with_allowlist(
-        dir.path(),
-        "skills:\n    claude:\n        Other:\n",
-    );
+    let config = config_with_allowlist(dir.path(), "skills:\n    claude:\n        Other:\n");
     let meta = SkillMeta {
         name: "Demo".into(),
         description: "d".into(),
@@ -184,10 +180,7 @@ fn plan_skipped_when_empty_allowlist() {
 #[test]
 fn plan_gemini_returns_cli_action() {
     let dir = TempDir::new().unwrap();
-    let config = config_with_allowlist(
-        dir.path(),
-        "skills:\n    gemini:\n        Demo:\n",
-    );
+    let config = config_with_allowlist(dir.path(), "skills:\n    gemini:\n        Demo:\n");
     let meta = SkillMeta {
         name: "Demo".into(),
         description: "d".into(),
@@ -224,16 +217,15 @@ fn plan_gemini_scope_from_config() {
         "user",
         &config,
     );
-    assert!(matches!(action, SkillInstallAction::GeminiCli { ref scope, .. } if scope == "workspace"));
+    assert!(
+        matches!(action, SkillInstallAction::GeminiCli { ref scope, .. } if scope == "workspace")
+    );
 }
 
 #[test]
 fn plan_copy_carries_claude_fields() {
     let dir = TempDir::new().unwrap();
-    let config = config_with_allowlist(
-        dir.path(),
-        "skills:\n    claude:\n        WikiLink:\n",
-    );
+    let config = config_with_allowlist(dir.path(), "skills:\n    claude:\n        WikiLink:\n");
     let mut fields = BTreeMap::new();
     fields.insert("argument-hint".into(), "[path]".into());
     let meta = SkillMeta {
@@ -250,8 +242,13 @@ fn plan_copy_carries_claude_fields() {
         &config,
     );
     match action {
-        SkillInstallAction::Copy { ref claude_fields, .. } => {
-            assert_eq!(claude_fields.get("argument-hint"), Some(&"[path]".to_string()));
+        SkillInstallAction::Copy {
+            ref claude_fields, ..
+        } => {
+            assert_eq!(
+                claude_fields.get("argument-hint"),
+                Some(&"[path]".to_string())
+            );
         }
         _ => panic!("expected Copy"),
     }
@@ -327,10 +324,7 @@ fn plan_from_dir_no_skill_yaml_needed() {
         None,
     );
 
-    let config = config_with_allowlist(
-        dir.path(),
-        "skills:\n    claude:\n        Simple:\n",
-    );
+    let config = config_with_allowlist(dir.path(), "skills:\n    claude:\n        Simple:\n");
 
     let actions = plan_skills_from_dir(
         &root,
@@ -342,7 +336,9 @@ fn plan_from_dir_no_skill_yaml_needed() {
     .unwrap();
 
     assert_eq!(actions.len(), 1);
-    assert!(matches!(&actions[0], SkillInstallAction::Copy { skill_name, .. } if skill_name == "Simple"));
+    assert!(
+        matches!(&actions[0], SkillInstallAction::Copy { skill_name, .. } if skill_name == "Simple")
+    );
 }
 
 #[test]
@@ -458,6 +454,82 @@ fn execute_copy_replaces_existing() {
     execute_skill_copy(&src, "TestSkill", &dst).unwrap();
     let content = fs::read_to_string(dst.join("TestSkill").join("SKILL.md")).unwrap();
     assert_eq!(content, "# New");
+}
+
+// ─── execute_skill_copy: symlink guard ───
+
+#[test]
+fn execute_copy_rejects_symlink() {
+    let dir = TempDir::new().unwrap();
+    let src = dir.path().join("src_skill");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("SKILL.md"), "# Test").unwrap();
+
+    let dst = dir.path().join("dst");
+    fs::create_dir_all(&dst).unwrap();
+    let real_target = dir.path().join("real_target");
+    fs::create_dir_all(&real_target).unwrap();
+    std::os::unix::fs::symlink(&real_target, dst.join("TestSkill")).unwrap();
+
+    let result = execute_skill_copy(&src, "TestSkill", &dst);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("symlink"));
+}
+
+// ─── clean_orphaned_skills ───
+
+#[test]
+fn orphan_skill_removes_renamed() {
+    let dir = TempDir::new().unwrap();
+    let dst = dir.path();
+
+    crate::manifest::update(dst, "forge-council", &["OldCouncil".to_string()]).unwrap();
+
+    let old_deployed = dst.join("OldCouncil");
+    fs::create_dir_all(&old_deployed).unwrap();
+    fs::write(old_deployed.join("SKILL.md"), "# Old").unwrap();
+
+    let current = vec!["NewCouncil".to_string()];
+    let removed = clean_orphaned_skills(dst, "forge-council", &current, false).unwrap();
+    assert_eq!(removed, vec!["OldCouncil"]);
+    assert!(!dst.join("OldCouncil").exists());
+}
+
+#[test]
+fn orphan_skill_keeps_current() {
+    let dir = TempDir::new().unwrap();
+    let dst = dir.path();
+
+    crate::manifest::update(dst, "forge-council", &["Council".to_string()]).unwrap();
+    let deployed = dst.join("Council");
+    fs::create_dir_all(&deployed).unwrap();
+    fs::write(deployed.join("SKILL.md"), "# Council").unwrap();
+
+    let current = vec!["Council".to_string()];
+    let removed = clean_orphaned_skills(dst, "forge-council", &current, false).unwrap();
+    assert!(removed.is_empty());
+    assert!(dst.join("Council").exists());
+}
+
+#[test]
+fn orphan_skill_dry_run_preserves() {
+    let dir = TempDir::new().unwrap();
+    let dst = dir.path();
+
+    crate::manifest::update(dst, "forge-council", &["OldSkill".to_string()]).unwrap();
+    let deployed = dst.join("OldSkill");
+    fs::create_dir_all(&deployed).unwrap();
+
+    let removed = clean_orphaned_skills(dst, "forge-council", &[], true).unwrap();
+    assert_eq!(removed, vec!["OldSkill"]);
+    assert!(dst.join("OldSkill").exists());
+}
+
+#[test]
+fn orphan_skill_empty_module_skips() {
+    let dir = TempDir::new().unwrap();
+    let removed = clean_orphaned_skills(dir.path(), "", &[], false).unwrap();
+    assert!(removed.is_empty());
 }
 
 // ─── Skill Generation (Codex wrappers) ───

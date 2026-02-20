@@ -90,18 +90,31 @@ pub fn validate_agent_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn is_synced_from(content: &str, expected_source: &str) -> bool {
+pub fn extract_source_field(content: &str) -> Option<String> {
     // TOML format: # source: comment on first line
     if let Some(first_line) = content.lines().next() {
         if let Some(source) = first_line.strip_prefix("# source:") {
             let source = source.trim();
-            if source == expected_source || source.ends_with(&format!("/{expected_source}")) {
-                return true;
+            if !source.is_empty() {
+                return Some(source.to_string());
             }
         }
     }
     // Frontmatter format: source: in YAML frontmatter
-    if let Some(source) = fm_value(content, "source") {
+    fm_value(content, "source")
+}
+
+pub fn module_name(content: &str) -> Option<String> {
+    fm_value(content, "name").or_else(|| {
+        content.lines().find_map(|l| {
+            l.strip_prefix("name:")
+                .map(|v| v.trim().trim_matches('"').trim_matches('\'').to_string())
+        })
+    })
+}
+
+pub fn is_synced_from(content: &str, expected_source: &str) -> bool {
+    if let Some(source) = extract_source_field(content) {
         if source == expected_source || source.ends_with(&format!("/{expected_source}")) {
             return true;
         }

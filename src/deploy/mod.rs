@@ -318,6 +318,45 @@ pub fn clean_agents(
     Ok(removed)
 }
 
+pub fn clean_orphaned_agents(
+    dst_dir: &Path,
+    module_name: &str,
+    current_agents: &[String],
+    provider: Provider,
+    dry_run: bool,
+) -> Result<Vec<String>, String> {
+    if module_name.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let previous = crate::manifest::read(dst_dir, module_name);
+    let ext = provider.agent_extension();
+    let mut removed = Vec::new();
+
+    for name in &previous {
+        if current_agents.contains(name) {
+            continue;
+        }
+        let path = dst_dir.join(format!("{name}.{ext}"));
+        if !path.exists() {
+            continue;
+        }
+        if !dry_run {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("failed to remove {}: {e}", path.display()))?;
+            if provider == Provider::Codex {
+                let prompt_path = dst_dir.join(format!("{name}.prompt.md"));
+                if prompt_path.exists() {
+                    let _ = std::fs::remove_file(&prompt_path);
+                }
+            }
+        }
+        removed.push(name.clone());
+    }
+
+    Ok(removed)
+}
+
 fn project_key() -> Result<String, String> {
     let cwd = env::current_dir().map_err(|e| format!("failed to get cwd: {e}"))?;
     Ok(cwd.to_string_lossy().replace('/', "-"))
