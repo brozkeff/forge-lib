@@ -191,7 +191,11 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 
     for entry in entries.filter_map(Result::ok) {
         let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
+        let name = entry.file_name();
+        if name == "SKILL.yaml" {
+            continue;
+        }
+        let dst_path = dst.join(name);
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {

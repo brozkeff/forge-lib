@@ -120,12 +120,34 @@ fn parse_args() -> Result<Args, ExitCode> {
     })
 }
 
-fn default_dst(provider: Provider) -> PathBuf {
+fn project_key() -> Result<String, String> {
+    let cwd = env::current_dir().map_err(|e| format!("failed to get cwd: {e}"))?;
+    Ok(cwd.to_string_lossy().replace('/', "-"))
+}
+
+fn resolve_dst(provider: Provider, scope: &str) -> Result<PathBuf, String> {
     let home = env::var("HOME").unwrap_or_default();
-    match provider {
-        Provider::Claude => PathBuf::from(format!("{home}/.claude/skills")),
-        Provider::Gemini => PathBuf::from(format!("{home}/.gemini/skills")),
-        Provider::Codex => PathBuf::from(format!("{home}/.codex/skills")),
+    let provider_dir = match provider {
+        Provider::Claude => ".claude",
+        Provider::Gemini => ".gemini",
+        Provider::Codex => ".codex",
+    };
+
+    match scope {
+        "user" => Ok(PathBuf::from(format!("{home}/{provider_dir}/skills"))),
+
+        "project" => {
+            let key = project_key()?;
+            Ok(PathBuf::from(format!(
+                "{home}/{provider_dir}/projects/{key}/skills"
+            )))
+        }
+
+        "workspace" => Ok(PathBuf::from(format!("{provider_dir}/skills"))),
+
+        other => Err(format!(
+            "invalid scope: {other} (use user, project, or workspace)"
+        )),
     }
 }
 
@@ -242,12 +264,19 @@ fn run(args: &Args) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    let dst_dir = args
-        .dst_override
-        .as_ref()
-        .map_or_else(|| default_dst(args.provider), PathBuf::from);
+    let dst_dir = match &args.dst_override {
+        Some(dst) => PathBuf::from(dst),
+        None => match resolve_dst(args.provider, &args.scope) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Error: {e}");
+                return ExitCode::from(1);
+            }
+        },
+    };
 
-    let config = SidecarConfig::load(Path::new("."));
+    let module_root = skills_path.parent().unwrap_or(Path::new("."));
+    let config = SidecarConfig::load(module_root);
 
     if args.clean && !args.dry_run {
         clean_skill_dir(&dst_dir);
