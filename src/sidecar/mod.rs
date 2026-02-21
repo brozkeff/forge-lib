@@ -145,12 +145,12 @@ pub fn resolve_model(model: &str, global: &ModelTiers, provider: &ModelTiers) ->
     }
 }
 
-fn load_yaml_file(path: &Path) -> Option<Value> {
+pub fn load_yaml_file(path: &Path) -> Option<Value> {
     let content = std::fs::read_to_string(path).ok()?;
     serde_yaml::from_str(&content).ok()
 }
 
-fn merge_values(base: Value, overlay: Value) -> Value {
+pub fn merge_values(base: Value, overlay: Value) -> Value {
     match (base, overlay) {
         (Value::Mapping(mut base_map), Value::Mapping(overlay_map)) => {
             for (k, v) in overlay_map {
