@@ -31,7 +31,7 @@ pub struct Suite {
 }
 
 impl Suite {
-    fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             checks: Vec::new(),
@@ -73,6 +73,14 @@ impl Suite {
     fn assert_match(&mut self, desc: &str, value: &str, pattern: &str) {
         let re = regex::Regex::new(pattern).unwrap();
         self.checks.push(if re.is_match(value) {
+            Check::pass(desc)
+        } else {
+            Check::fail(desc)
+        });
+    }
+
+    pub fn check(&mut self, desc: &str, passed: bool) {
+        self.checks.push(if passed {
             Check::pass(desc)
         } else {
             Check::fail(desc)

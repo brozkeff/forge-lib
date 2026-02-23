@@ -2,6 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use forge_lib::dci;
 use forge_lib::validate;
 
 fn print_suite(suite: &validate::Suite) {
@@ -43,7 +44,9 @@ fn main() -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         eprintln!("Usage: validate-module [module-root]");
         eprintln!();
-        eprintln!("Validates forge module structure, agents, defaults, skills, and deploy parity.");
+        eprintln!(
+            "Validates forge module structure, agents, defaults, skills, deploy parity, and DCI."
+        );
         eprintln!("Defaults to current directory if no module-root is specified.");
         return ExitCode::SUCCESS;
     }
@@ -65,6 +68,7 @@ fn main() -> ExitCode {
         validate::validate_defaults(&root),
         validate::validate_skills(&root),
         validate::validate_deploy_parity(&root),
+        dci::validate_dci(&root),
     ];
 
     let mut total_fail = 0;

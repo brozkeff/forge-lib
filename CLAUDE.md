@@ -4,10 +4,11 @@ Shared Rust library consumed as a git submodule at `lib/`. Not a Claude Code plu
 
 ## API Surface
 
-Six library modules:
+Seven library modules:
 
 | Module | Key Functions |
 |--------|--------------|
+| `dci` | `extract_dci_lines`, `extract_bash_block_lines`, `validate_dci` |
 | `parse` | `fm_value`, `fm_body`, `fm_list`, `split_frontmatter` |
 | `strip` | `strip_front`, `strip_front_keep` |
 | `sidecar` | `SidecarConfig::load`, `agent_value`, `skill_value` |
@@ -22,7 +23,7 @@ Six library modules:
 | `strip-front` | Strip YAML frontmatter and H1 heading from markdown |
 | `install-agents` | Deploy agent markdown to Claude/Gemini/Codex/OpenCode directories |
 | `install-skills` | Install skills with provider-specific routing and wrapper generation |
-| `validate-module` | Convention test suite for forge modules (5 suites) |
+| `validate-module` | Convention test suite for forge modules |
 
 All binaries support `--version` and `--help`. All support all providers (Claude, Gemini, Codex, OpenCode).
 
@@ -30,7 +31,7 @@ All binaries support `--version` and `--help`. All support all providers (Claude
 
 ```bash
 make build    # cargo build --release + symlink to bin/
-make test     # cargo test (~240 tests)
+make test     # cargo test
 make lint     # cargo fmt --check + clippy pedantic
 make check    # verify bin/ symlinks
 make clean    # cargo clean + rm bin/

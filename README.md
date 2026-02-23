@@ -6,7 +6,7 @@ Shared Rust library and CLI binaries for Forge modules. Provides frontmatter par
 
 ```bash
 make build    # cargo build --release + symlinks to bin/
-make test     # cargo test (222 tests)
+make test     # cargo test
 make lint     # cargo fmt --check + clippy
 make check    # verify bin/ has all binaries
 make clean    # cargo clean + rm bin/
@@ -46,7 +46,7 @@ install-agents: $(INSTALL_AGENTS)
 forge-lib = { path = "lib" }
 ```
 
-Five modules: `parse` (frontmatter), `strip` (markdown processing), `sidecar` (YAML config), `deploy` (agent deployment), `skill` (skill installation).
+Seven modules: `dci` (DCI/bash block validation), `parse` (frontmatter), `strip` (markdown processing), `sidecar` (YAML config), `deploy` (agent deployment), `skill` (skill installation), `validate` (module convention suites).
 
 ## CLI Binaries
 
@@ -55,6 +55,7 @@ Five modules: `parse` (frontmatter), `strip` (markdown processing), `sidecar` (Y
 | `strip-front` | Strip YAML frontmatter and H1 heading from markdown |
 | `install-agents` | Deploy agent markdown files to Claude/Gemini/Codex directories |
 | `install-skills` | Install skills with provider-specific routing and wrapper generation |
+| `validate-module` | Convention test suite for forge modules |
 
 ## Updating forge-lib
 

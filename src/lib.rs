@@ -1,3 +1,4 @@
+pub mod dci;
 pub mod deploy;
 pub mod manifest;
 pub mod parse;
