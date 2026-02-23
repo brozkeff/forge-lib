@@ -224,7 +224,7 @@ pub fn merge_claude_fields(skill_md: &str, fields: &BTreeMap<String, String>) ->
         // No frontmatter — wrap body with new frontmatter
         let mut out = String::from("---\n");
         for (k, v) in fields {
-            let _ = writeln!(out, "{k}: {v}");
+            let _ = writeln!(out, "{k}: {}", yaml_scalar(v));
         }
         out.push_str("---\n");
         out.push_str(skill_md);
@@ -240,7 +240,7 @@ pub fn merge_claude_fields(skill_md: &str, fields: &BTreeMap<String, String>) ->
         // Only add if not already present in frontmatter
         let key_prefix = format!("{k}:");
         if !fm.lines().any(|line| line.starts_with(&key_prefix)) {
-            let _ = writeln!(out, "{k}: {v}");
+            let _ = writeln!(out, "{k}: {}", yaml_scalar(v));
         }
     }
     out.push_str("---\n");
@@ -293,10 +293,11 @@ pub fn format_agent_skill_md(
     let mut out = String::new();
     out.push_str("---\n");
     let _ = writeln!(out, "name: {agent_name}");
-    let _ = writeln!(out, "description: \"{}\"", escape_yaml_string(description));
+    let _ = writeln!(out, "description: {}", yaml_scalar(description));
     let _ = writeln!(
         out,
-        "argument-hint: \"[task, files, or question for {agent_name}]\""
+        "argument-hint: {}",
+        yaml_scalar(&format!("[task, files, or question for {agent_name}]"))
     );
     out.push_str("---\n\n");
     let _ = writeln!(out, "# {agent_name}");
@@ -321,10 +322,11 @@ pub fn format_agent_skill_yaml(
 ) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "name: {agent_name}");
-    let _ = writeln!(out, "description: \"{}\"", escape_yaml_string(description));
+    let _ = writeln!(out, "description: {}", yaml_scalar(description));
     let _ = writeln!(
         out,
-        "argument-hint: \"[task, files, or question for {agent_name}]\""
+        "argument-hint: {}",
+        yaml_scalar(&format!("[task, files, or question for {agent_name}]"))
     );
     out.push_str("providers:\n");
     out.push_str("  claude:\n");
@@ -340,8 +342,11 @@ pub fn format_agent_skill_yaml(
     out
 }
 
-fn escape_yaml_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+fn yaml_scalar(s: &str) -> String {
+    serde_yaml::to_string(s)
+        .unwrap_or_else(|_| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+        .trim()
+        .to_string()
 }
 
 pub fn generate_skill_from_agent(content: &str, filename: &str) -> Option<GeneratedSkill> {

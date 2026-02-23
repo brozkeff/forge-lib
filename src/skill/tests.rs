@@ -385,7 +385,7 @@ fn merge_adds_fields_to_frontmatter() {
     let mut fields = BTreeMap::new();
     fields.insert("argument-hint".into(), "[path]".into());
     let result = merge_claude_fields(md, &fields);
-    assert!(result.contains("argument-hint: [path]"));
+    assert!(result.contains("argument-hint: '[path]'"));
     assert!(result.contains("name: Demo"));
     assert!(result.contains("# Demo"));
 }
@@ -407,8 +407,8 @@ fn merge_multiple_fields() {
     fields.insert("argument-hint".into(), "[args]".into());
     fields.insert("disable-model-invocation".into(), "true".into());
     let result = merge_claude_fields(md, &fields);
-    assert!(result.contains("argument-hint: [args]"));
-    assert!(result.contains("disable-model-invocation: true"));
+    assert!(result.contains("argument-hint: '[args]'"));
+    assert!(result.contains("disable-model-invocation: 'true'"));
 }
 
 #[test]
@@ -418,7 +418,7 @@ fn merge_no_frontmatter_wraps() {
     fields.insert("argument-hint".into(), "[args]".into());
     let result = merge_claude_fields(md, &fields);
     assert!(result.starts_with("---\n"));
-    assert!(result.contains("argument-hint: [args]"));
+    assert!(result.contains("argument-hint: '[args]'"));
     assert!(result.contains("# Demo"));
 }
 
@@ -595,7 +595,8 @@ fn format_skill_md_structure() {
     let md = format_agent_skill_md("Agent", "A specialist", "Do things.\n", "Agent.md");
     assert!(md.starts_with("---\n"));
     assert!(md.contains("name: Agent"));
-    assert!(md.contains("description: \"A specialist\""));
+    assert!(md.contains("description: A specialist"));
+    assert!(md.contains("argument-hint: '[task, files, or question for Agent]'"));
     assert!(md.contains("# Agent"));
     assert!(md.contains("Generated from agents/Agent.md"));
     assert!(md.contains("Do things."));
@@ -615,5 +616,91 @@ fn format_skill_yaml_codex_only() {
 #[test]
 fn format_skill_yaml_escapes_quotes() {
     let yaml = format_agent_skill_yaml("Agent", "A \"quoted\" desc", "Agent.md");
-    assert!(yaml.contains("A \\\"quoted\\\" desc"));
+    assert!(yaml.contains("description: A \"quoted\" desc"));
+}
+
+// ─── yaml_scalar ───
+
+#[test]
+fn yaml_scalar_simple_unquoted() {
+    assert_eq!(yaml_scalar("hello"), "hello");
+    assert_eq!(yaml_scalar("A specialist"), "A specialist");
+}
+
+#[test]
+fn yaml_scalar_brackets_quoted() {
+    assert_eq!(yaml_scalar("[path]"), "'[path]'");
+}
+
+#[test]
+fn yaml_scalar_pipes_quoted() {
+    // Pipe mid-value is safe in YAML; only leading | triggers block scalar
+    assert_eq!(yaml_scalar("a|b"), "a|b");
+    // But leading pipe must be quoted
+    assert_eq!(yaml_scalar("|block"), "'|block'");
+}
+
+#[test]
+fn yaml_scalar_yaml_keywords_quoted() {
+    assert_eq!(yaml_scalar("true"), "'true'");
+    assert_eq!(yaml_scalar("false"), "'false'");
+    assert_eq!(yaml_scalar("null"), "'null'");
+}
+
+#[test]
+fn yaml_scalar_colon_space_quoted() {
+    assert_eq!(yaml_scalar("key: value"), "'key: value'");
+}
+
+#[test]
+fn yaml_scalar_hash_quoted() {
+    assert_eq!(yaml_scalar("# comment"), "'# comment'");
+}
+
+#[test]
+fn yaml_scalar_empty_quoted() {
+    assert_eq!(yaml_scalar(""), "''");
+}
+
+#[test]
+fn merge_brackets_and_pipes() {
+    let md = "---\nname: DebateCouncil\nversion: 0.1.0\n---\n# DebateCouncil\n";
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "argument-hint".into(),
+        "[topic or question to debate] [with security|with opponent|with docs] [autonomous|interactive|quick]".into(),
+    );
+    let result = merge_claude_fields(md, &fields);
+    // Must be valid YAML — the original bug report
+    let fm = result
+        .strip_prefix("---\n")
+        .and_then(|s| s.split_once("---\n"))
+        .map(|(fm, _)| fm)
+        .unwrap();
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(fm).expect("frontmatter must be valid YAML");
+    let hint = parsed["argument-hint"].as_str().unwrap();
+    assert_eq!(
+        hint,
+        "[topic or question to debate] [with security|with opponent|with docs] [autonomous|interactive|quick]"
+    );
+}
+
+#[test]
+fn merge_roundtrip_valid_yaml() {
+    let md = "---\nname: Test\n---\n# Test\n";
+    let mut fields = BTreeMap::new();
+    fields.insert("argument-hint".into(), "[path to file]".into());
+    fields.insert("disable-model-invocation".into(), "true".into());
+    let result = merge_claude_fields(md, &fields);
+    let fm = result
+        .strip_prefix("---\n")
+        .and_then(|s| s.split_once("---\n"))
+        .map(|(fm, _)| fm)
+        .unwrap();
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(fm).expect("round-trip must produce valid YAML");
+    assert_eq!(parsed["name"].as_str().unwrap(), "Test");
+    assert_eq!(parsed["argument-hint"].as_str().unwrap(), "[path to file]");
+    assert_eq!(parsed["disable-model-invocation"].as_str().unwrap(), "true");
 }
