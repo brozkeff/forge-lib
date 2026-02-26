@@ -18,7 +18,20 @@ OPENCODE_SKILLS_DST ?= $(if $(filter workspace,$(SCOPE)),$(CURDIR)/.opencode/ski
 INSTALL_AGENTS  ?= $(LIB_DIR)/bin/install-agents
 INSTALL_SKILLS  ?= $(LIB_DIR)/bin/install-skills
 VALIDATE_MODULE ?= $(LIB_DIR)/bin/validate-module
+YAML_CLI        ?= $(LIB_DIR)/bin/yaml
 
 # Binary prerequisite: build forge-lib when binaries are missing
-$(INSTALL_AGENTS) $(INSTALL_SKILLS) $(VALIDATE_MODULE): init
+$(INSTALL_AGENTS) $(INSTALL_SKILLS) $(VALIDATE_MODULE) $(YAML_CLI): init
 	@$(MAKE) -C $(LIB_DIR) build
+
+# Derive AGENTS and SKILLS from defaults.yaml.
+# Priority: yq (system) → yaml (forge-lib) → empty (pass AGENTS/SKILLS explicitly).
+ifneq ($(wildcard defaults.yaml),)
+  AGENTS ?= $(shell { command -v yq >/dev/null 2>&1 \
+    && yq -r '(.agents // {}) | keys | .[]' defaults.yaml \
+    || $(YAML_CLI) keys defaults.yaml .agents; } 2>/dev/null | tr '\n' ' ')
+
+  SKILLS ?= $(shell { command -v yq >/dev/null 2>&1 \
+    && yq -r '(.skills.claude // {}) | keys | .[]' defaults.yaml \
+    || $(YAML_CLI) keys defaults.yaml .skills.claude; } 2>/dev/null | tr '\n' ' ')
+endif

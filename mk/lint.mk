@@ -9,13 +9,13 @@ lint-schema:
 	@if ! command -v mdschema >/dev/null 2>&1; then \
 	  echo "  SKIP mdschema (not installed — brew install jackchuka/tap/mdschema)"; \
 	else \
-	  if [ -f $(SKILL_SRC)/.mdschema.yml ]; then \
-	    echo "  skills ($(SKILL_SRC)/.mdschema.yml)"; \
-	    mdschema check "$(SKILL_SRC)/*/SKILL.md" --schema $(SKILL_SRC)/.mdschema.yml; \
+	  if [ -f $(SKILL_SRC)/.mdschema ]; then \
+	    echo "  skills ($(SKILL_SRC)/.mdschema)"; \
+	    mdschema check "$(SKILL_SRC)/*/SKILL.md" --schema $(SKILL_SRC)/.mdschema; \
 	  fi; \
-	  if [ -f $(AGENT_SRC)/.mdschema.yml ]; then \
-	    echo "  agents ($(AGENT_SRC)/.mdschema.yml)"; \
-	    mdschema check "$(AGENT_SRC)/*.md" --schema $(AGENT_SRC)/.mdschema.yml; \
+	  if [ -f $(AGENT_SRC)/.mdschema ]; then \
+	    echo "  agents ($(AGENT_SRC)/.mdschema)"; \
+	    mdschema check "$(AGENT_SRC)/*.md" --schema $(AGENT_SRC)/.mdschema; \
 	  fi; \
 	fi
 
