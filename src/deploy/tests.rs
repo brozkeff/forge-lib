@@ -323,6 +323,7 @@ fn make_meta() -> AgentMeta {
         model: "sonnet".into(),
         description: "System architect".into(),
         tools: Some("Read, Bash".into()),
+        skills: Vec::new(),
         source_file: "SecurityArchitect.md".into(),
         source: "SecurityArchitect.md".into(),
         reasoning_effort: None,
@@ -366,6 +367,7 @@ fn format_gemini_with_mapped_tools() {
         model: "gemini-2.0-flash".into(),
         description: "System architect".into(),
         tools: Some("Read, Bash".into()),
+        skills: Vec::new(),
         source_file: "SecurityArchitect.md".into(),
         source: "SecurityArchitect.md".into(),
         reasoning_effort: None,
@@ -387,6 +389,7 @@ fn format_gemini_without_model() {
         model: "gemini-2.0-flash".into(),
         description: "Developer".into(),
         tools: Some("Read".into()),
+        skills: Vec::new(),
         source_file: "Dev.md".into(),
         source: "Dev.md".into(),
         reasoning_effort: None,
@@ -474,6 +477,73 @@ fn format_codex_body_in_prompt_file() {
     assert!(!output.primary.contains("## Role"));
     let (_, prompt_content) = output.prompt_file.unwrap();
     assert!(prompt_content.contains(body));
+}
+
+// ─── skills rendering ───
+
+#[test]
+fn format_claude_with_skills() {
+    let mut meta = make_meta();
+    meta.skills = vec!["Git".into(), "SecretScan".into()];
+    let output = format_agent_output(&meta, "Body.\n", Provider::Claude, true);
+    assert!(output.primary.contains("skills:\n  - Git\n  - SecretScan\n"));
+}
+
+#[test]
+fn format_claude_without_skills() {
+    let meta = make_meta();
+    let output = format_agent_output(&meta, "Body.\n", Provider::Claude, true);
+    assert!(!output.primary.contains("skills:"));
+}
+
+#[test]
+fn format_gemini_with_skills() {
+    let mut meta = make_meta();
+    meta.display_name = "security-architect".into();
+    meta.skills = vec!["Git".into()];
+    let output = format_agent_output(&meta, "Body.\n", Provider::Gemini, true);
+    assert!(output.primary.contains("skills:\n  - Git\n"));
+}
+
+#[test]
+fn format_codex_ignores_skills() {
+    let mut meta = make_meta();
+    meta.skills = vec!["Git".into()];
+    let output = format_agent_output(&meta, "Body.\n", Provider::Codex, true);
+    assert!(!output.primary.contains("skills"));
+}
+
+#[test]
+fn extract_skills_from_config() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "agents:\n  Developer:\n    model: sonnet\n    tools: Read\n    skills:\n      - Git\n      - RustDevelopment\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    let content = "---\nname: Developer\ndescription: Dev\nversion: 0.3.0\n---\nBody.\n";
+    let meta =
+        extract_agent_meta(content, "Developer.md", Provider::Claude, &config, "").unwrap();
+    assert_eq!(meta.skills, vec!["Git", "RustDevelopment"]);
+}
+
+#[test]
+fn extract_skills_from_frontmatter_fallback() {
+    let config = SidecarConfig::default();
+    let content = "---\nclaude.name: Developer\nclaude.skills:\n  - Git\n  - DefensiveProgramming\n---\nBody.\n";
+    let meta =
+        extract_agent_meta(content, "Developer.md", Provider::Claude, &config, "").unwrap();
+    assert_eq!(meta.skills, vec!["Git", "DefensiveProgramming"]);
+}
+
+#[test]
+fn extract_no_skills_returns_empty() {
+    let config = SidecarConfig::default();
+    let content = "---\nname: Developer\ndescription: Dev\n---\nBody.\n";
+    let meta =
+        extract_agent_meta(content, "Developer.md", Provider::Claude, &config, "").unwrap();
+    assert!(meta.skills.is_empty());
 }
 
 // ─── extract_agent_meta ───

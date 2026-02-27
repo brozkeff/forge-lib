@@ -13,6 +13,7 @@ pub struct AgentMeta {
     pub model: String,
     pub description: String,
     pub tools: Option<String>,
+    pub skills: Vec<String>,
     pub source_file: String,
     pub source: String,
     pub reasoning_effort: Option<String>,
@@ -82,6 +83,12 @@ pub fn format_agent_output(
                     let _ = writeln!(out, "  - {tool}");
                 }
             }
+            if !meta.skills.is_empty() {
+                out.push_str("skills:\n");
+                for skill in &meta.skills {
+                    let _ = writeln!(out, "  - {skill}");
+                }
+            }
         }
         Provider::Claude | Provider::OpenCode => {
             out.push_str("---\n");
@@ -92,6 +99,12 @@ pub fn format_agent_output(
             }
             if let Some(ref tools) = meta.tools {
                 let _ = writeln!(out, "tools: {tools}");
+            }
+            if !meta.skills.is_empty() {
+                out.push_str("skills:\n");
+                for skill in &meta.skills {
+                    let _ = writeln!(out, "  - {skill}");
+                }
             }
         }
     }
@@ -142,6 +155,18 @@ pub fn extract_agent_meta(
         .or_else(|| parse::fm_list(content, "claude.tools"))
         .or_else(|| parse::fm_value(content, "claude.tools"));
 
+    let skills = {
+        let from_config = config.agent_list(&name, "skills");
+        if !from_config.is_empty() {
+            from_config
+        } else {
+            parse::fm_list(content, "claude.skills")
+                .or_else(|| parse::fm_list(content, "skills"))
+                .map(|s| s.split(", ").map(String::from).collect::<Vec<_>>())
+                .unwrap_or_default()
+        }
+    };
+
     let global = config.global_tiers();
     let provider_tiers = config.provider_tiers(provider.as_str());
     let model = resolve_model(&model_tier, &global, &provider_tiers);
@@ -164,6 +189,7 @@ pub fn extract_agent_meta(
         model,
         description,
         tools,
+        skills,
         source_file: filename.to_string(),
         source,
         reasoning_effort,

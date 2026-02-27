@@ -316,6 +316,74 @@ fn agent_missing_returns_none() {
     assert_eq!(config.agent_value("NonExistent", "model"), None);
 }
 
+// --- agent_list ---
+
+#[test]
+fn agent_list_returns_sequence() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "agents:\n  Developer:\n    skills:\n      - Git\n      - SecretScan\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.agent_list("Developer", "skills"),
+        vec!["Git", "SecretScan"]
+    );
+}
+
+#[test]
+fn agent_list_from_inline_array() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "agents:\n  Developer:\n    skills: [Git, SecretScan]\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.agent_list("Developer", "skills"),
+        vec!["Git", "SecretScan"]
+    );
+}
+
+#[test]
+fn agent_list_from_comma_string() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "agents:\n  Developer:\n    tools: Read, Grep, Bash\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.agent_list("Developer", "tools"),
+        vec!["Read", "Grep", "Bash"]
+    );
+}
+
+#[test]
+fn agent_list_missing_returns_empty() {
+    let config = SidecarConfig::default();
+    assert!(config.agent_list("NonExistent", "skills").is_empty());
+}
+
+#[test]
+fn agent_list_flat_fallback() {
+    let dir = TempDir::new().unwrap();
+    write_yaml(
+        dir.path(),
+        "defaults.yaml",
+        "Developer:\n  skills:\n    - Git\n    - RustDevelopment\n",
+    );
+    let config = SidecarConfig::load(dir.path());
+    assert_eq!(
+        config.agent_list("Developer", "skills"),
+        vec!["Git", "RustDevelopment"]
+    );
+}
+
 // --- skill_value ---
 
 #[test]

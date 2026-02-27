@@ -77,6 +77,22 @@ impl SidecarConfig {
         normalize_value(val)
     }
 
+    pub fn agent_list(&self, agent: &str, key: &str) -> Vec<String> {
+        let val = navigate(&self.raw, &["agents", agent, key])
+            .or_else(|| navigate(&self.raw, &[agent, key]));
+        match val {
+            Some(Value::Sequence(seq)) => seq
+                .iter()
+                .filter_map(|v| match v {
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect(),
+            Some(Value::String(s)) => s.split(", ").map(String::from).collect(),
+            _ => Vec::new(),
+        }
+    }
+
     pub fn skill_value(&self, skill_name: &str, key: &str) -> Option<String> {
         let val = navigate(&self.raw, &["skills", skill_name, key])
             .or_else(|| navigate(&self.raw, &[skill_name, key]))?;
