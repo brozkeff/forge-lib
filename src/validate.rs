@@ -147,17 +147,129 @@ fn read_agents(agents_dir: &Path) -> Vec<(String, String)> {
     agents
 }
 
+const KNOWN_PROVIDERS: &[&str] = &["claude", "gemini", "codex", "opencode"];
+
+/// Extract agent names from defaults.yaml `agents:` section.
+/// Supports two formats:
+///   Flat:     agents: { AgentName: { model: ..., tools: ... } }
+///   Nested:   agents: { claude: { AgentName: { model: ... } } }
 fn roster_names(defaults_content: &str) -> Vec<String> {
     let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
         return Vec::new();
     };
     let mut names = Vec::new();
     if let Some(agents) = yaml.get("agents") {
-        for section in &["council", "standalone"] {
-            if let Some(serde_yaml::Value::Sequence(list)) = agents.get(section) {
-                for item in list {
-                    if let Some(s) = item.as_str() {
-                        names.push(s.to_string());
+        if let Some(mapping) = agents.as_mapping() {
+            for (key, value) in mapping {
+                let key_str = key.as_str().unwrap_or_default();
+                if KNOWN_PROVIDERS.contains(&key_str) {
+                    if let Some(inner) = value.as_mapping() {
+                        for (agent_key, _) in inner {
+                            if let Some(s) = agent_key.as_str() {
+                                if !names.contains(&s.to_string()) {
+                                    names.push(s.to_string());
+                                }
+                            }
+                        }
+                    }
+                } else if value.is_mapping() {
+                    names.push(key_str.to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Find the agent config block (model + tools) in defaults.yaml.
+/// Checks flat agents: { Name: {...} } and nested agents: { provider: { Name: {...} } }.
+fn has_config_block(defaults_content: &str, agent_name: &str) -> bool {
+    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
+        return false;
+    };
+    let check = |block: &serde_yaml::Value| -> bool {
+        block.get("model").is_some() && block.get("tools").is_some()
+    };
+    if let Some(agents) = yaml.get("agents") {
+        if let Some(block) = agents.get(agent_name) {
+            if check(block) {
+                return true;
+            }
+        }
+        if let Some(mapping) = agents.as_mapping() {
+            for (key, value) in mapping {
+                if KNOWN_PROVIDERS.contains(&key.as_str().unwrap_or_default()) {
+                    if let Some(block) = value.get(agent_name) {
+                        if check(block) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Get model tier for an agent from defaults.yaml.
+fn roster_model(defaults_content: &str, agent_name: &str) -> String {
+    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
+        return String::new();
+    };
+    if let Some(agents) = yaml.get("agents") {
+        if let Some(m) = agents
+            .get(agent_name)
+            .and_then(|b| b.get("model"))
+            .and_then(|v| v.as_str())
+        {
+            return m.to_string();
+        }
+        if let Some(mapping) = agents.as_mapping() {
+            for (key, value) in mapping {
+                if KNOWN_PROVIDERS.contains(&key.as_str().unwrap_or_default()) {
+                    if let Some(m) = value
+                        .get(agent_name)
+                        .and_then(|b| b.get("model"))
+                        .and_then(|v| v.as_str())
+                    {
+                        return m.to_string();
+                    }
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+/// Extract skill names that have `roles:` from defaults.yaml `skills:` section.
+/// Supports flat and provider-nested formats.
+fn skills_with_roles(defaults_content: &str) -> Vec<String> {
+    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let collect = |mapping: &serde_yaml::Mapping, out: &mut Vec<String>| {
+        for (key, value) in mapping {
+            if let Some(name) = key.as_str() {
+                if value.get("roles").and_then(|r| r.as_sequence()).is_some() {
+                    if !out.contains(&name.to_string()) {
+                        out.push(name.to_string());
+                    }
+                }
+            }
+        }
+    };
+    if let Some(skills) = yaml.get("skills") {
+        if let Some(mapping) = skills.as_mapping() {
+            for (key, value) in mapping {
+                let key_str = key.as_str().unwrap_or_default();
+                if KNOWN_PROVIDERS.contains(&key_str) {
+                    if let Some(inner) = value.as_mapping() {
+                        collect(inner, &mut names);
+                    }
+                } else if value.is_mapping() {
+                    if value.get("roles").and_then(|r| r.as_sequence()).is_some() {
+                        names.push(key_str.to_string());
                     }
                 }
             }
@@ -166,46 +278,43 @@ fn roster_names(defaults_content: &str) -> Vec<String> {
     names
 }
 
-fn council_names(defaults_content: &str) -> Vec<String> {
+/// Get roles for a skill from defaults.yaml.
+fn skill_roles(defaults_content: &str, skill_name: &str) -> Vec<String> {
     let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
         return Vec::new();
     };
-    let mut names = Vec::new();
-    if let Some(serde_yaml::Value::Mapping(councils)) = yaml.get("councils") {
-        for (key, _) in councils {
-            if let Some(s) = key.as_str() {
-                names.push(s.to_string());
+    let extract = |block: &serde_yaml::Value| -> Vec<String> {
+        block
+            .get("roles")
+            .and_then(|r| r.as_sequence())
+            .map(|list| {
+                list.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    if let Some(skills) = yaml.get("skills") {
+        if let Some(block) = skills.get(skill_name) {
+            let roles = extract(block);
+            if !roles.is_empty() {
+                return roles;
             }
         }
-    }
-    names
-}
-
-fn council_roles(defaults_content: &str, council_name: &str) -> Vec<String> {
-    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
-        return Vec::new();
-    };
-    let mut roles = Vec::new();
-    if let Some(council) = yaml.get("councils").and_then(|c| c.get(council_name)) {
-        if let Some(serde_yaml::Value::Sequence(list)) = council.get("roles") {
-            for item in list {
-                if let Some(s) = item.as_str() {
-                    roles.push(s.to_string());
+        if let Some(mapping) = skills.as_mapping() {
+            for (key, value) in mapping {
+                if KNOWN_PROVIDERS.contains(&key.as_str().unwrap_or_default()) {
+                    if let Some(block) = value.get(skill_name) {
+                        let roles = extract(block);
+                        if !roles.is_empty() {
+                            return roles;
+                        }
+                    }
                 }
             }
         }
     }
-    roles
-}
-
-fn has_config_block(defaults_content: &str, agent_name: &str) -> bool {
-    let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(defaults_content) else {
-        return false;
-    };
-    let Some(block) = yaml.get(agent_name) else {
-        return false;
-    };
-    block.get("model").is_some() && block.get("tools").is_some()
+    Vec::new()
 }
 
 fn check_agent_body_conventions(s: &mut Suite, agents: &[(String, String)]) {
@@ -217,7 +326,7 @@ fn check_agent_body_conventions(s: &mut Suite, agents: &[(String, String)]) {
         "## Constraints",
     ];
     for (_, content) in agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
+        let name = parse::fm_value(content, "name").unwrap_or_default();
         let body = parse::fm_body(content);
         for heading in &required_sections {
             s.assert_contains(&format!("{name}: has '{heading}'"), body, heading);
@@ -225,13 +334,13 @@ fn check_agent_body_conventions(s: &mut Suite, agents: &[(String, String)]) {
     }
 
     for (_, content) in agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
+        let name = parse::fm_value(content, "name").unwrap_or_default();
         let body = parse::fm_body(content);
         s.assert_contains(&format!("{name}: honesty clause (say so)"), body, "say so");
     }
 
     for (_, content) in agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
+        let name = parse::fm_value(content, "name").unwrap_or_default();
         let body = parse::fm_body(content);
         s.assert_contains(
             &format!("{name}: team clause (SendMessage)"),
@@ -241,12 +350,12 @@ fn check_agent_body_conventions(s: &mut Suite, agents: &[(String, String)]) {
     }
 
     for (_, content) in agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
+        let name = parse::fm_value(content, "name").unwrap_or_default();
         let body = parse::fm_body(content);
         s.assert_contains(
             &format!("{name}: shipped-with marker"),
             body,
-            "Shipped with forge-",
+            "Shipped with ",
         );
     }
 }
@@ -269,33 +378,24 @@ pub fn validate_agent_frontmatter(root: &Path) -> Suite {
         &agents.len().to_string(),
     );
 
-    let required_keys = [
-        "title",
-        "description",
-        "claude.name",
-        "claude.model",
-        "claude.description",
-        "claude.tools",
-    ];
-
-    for (name, content) in &agents {
-        for key in &required_keys {
+    for (filename, content) in &agents {
+        for key in &["name", "description", "version"] {
             let val = parse::fm_value(content, key).unwrap_or_default();
-            s.assert_not_empty(&format!("{name} has {key}"), &val);
+            s.assert_not_empty(&format!("{filename} has {key}"), &val);
         }
     }
 
-    for (name, content) in &agents {
-        let claude_name = parse::fm_value(content, "claude.name").unwrap_or_default();
+    for (filename, content) in &agents {
+        let fm_name = parse::fm_value(content, "name").unwrap_or_default();
         s.assert_eq(
-            &format!("{name}: filename matches claude.name"),
-            name,
-            &claude_name,
+            &format!("{filename}: filename matches name"),
+            filename,
+            &fm_name,
         );
     }
 
     for (_, content) in &agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
+        let name = parse::fm_value(content, "name").unwrap_or_default();
         s.assert_match(
             &format!("{name} is PascalCase"),
             &name,
@@ -305,9 +405,9 @@ pub fn validate_agent_frontmatter(root: &Path) -> Suite {
 
     let valid_models = ["sonnet", "opus", "haiku", "fast", "strong"];
     for (_, content) in &agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
-        let model = parse::fm_value(content, "claude.model").unwrap_or_default();
-        let is_valid = valid_models.contains(&model.as_str());
+        let name = parse::fm_value(content, "name").unwrap_or_default();
+        let model = roster_model(&defaults_content, &name);
+        let is_valid = !model.is_empty() && valid_models.contains(&model.as_str());
         s.checks.push(if is_valid {
             Check::pass(format!("{name}: model '{model}' is valid"))
         } else {
@@ -316,8 +416,8 @@ pub fn validate_agent_frontmatter(root: &Path) -> Suite {
     }
 
     for (_, content) in &agents {
-        let name = parse::fm_value(content, "claude.name").unwrap_or_default();
-        let desc = parse::fm_value(content, "claude.description").unwrap_or_default();
+        let name = parse::fm_value(content, "name").unwrap_or_default();
+        let desc = parse::fm_value(content, "description").unwrap_or_default();
         s.assert_contains(
             &format!("{name}: description has USE WHEN"),
             &desc,
@@ -346,18 +446,18 @@ pub fn validate_defaults(root: &Path) -> Suite {
         );
     }
 
-    let councils = council_names(&defaults_content);
-    for council_name in &councils {
-        let roles = council_roles(&defaults_content, council_name);
+    let skills = skills_with_roles(&defaults_content);
+    for skill_name in &skills {
+        let roles = skill_roles(&defaults_content, skill_name);
         for role in &roles {
             let found = roster.iter().any(|r| r == role);
             s.checks.push(if found {
                 Check::pass(format!(
-                    "council '{council_name}' role '{role}' is in roster"
+                    "skill '{skill_name}' role '{role}' is in roster"
                 ))
             } else {
                 Check::fail(format!(
-                    "council '{council_name}' role '{role}' is in roster"
+                    "skill '{skill_name}' role '{role}' is in roster"
                 ))
             });
         }
@@ -740,27 +840,52 @@ mod tests {
     }
 
     #[test]
-    fn roster_extraction() {
-        let yaml = "agents:\n  council:\n    - Dev\n    - QA\n  standalone:\n    - Ops\n";
+    fn roster_flat() {
+        let yaml = "agents:\n  Dev:\n    model: fast\n    tools: Read\n  QA:\n    model: fast\n    tools: Read\n";
         let names = roster_names(yaml);
-        assert_eq!(names, vec!["Dev", "QA", "Ops"]);
+        assert_eq!(names, vec!["Dev", "QA"]);
     }
 
     #[test]
-    fn council_extraction() {
-        let yaml =
-            "councils:\n  dev:\n    roles:\n      - Dev\n      - QA\n  ops:\n    roles:\n      - Ops\n";
-        let names = council_names(yaml);
-        assert_eq!(names, vec!["dev", "ops"]);
-        assert_eq!(council_roles(yaml, "dev"), vec!["Dev", "QA"]);
-        assert_eq!(council_roles(yaml, "ops"), vec!["Ops"]);
+    fn roster_nested() {
+        let yaml = "agents:\n  claude:\n    Dev:\n      model: fast\n    QA:\n      model: fast\n";
+        let names = roster_names(yaml);
+        assert_eq!(names, vec!["Dev", "QA"]);
     }
 
     #[test]
-    fn config_block_detection() {
-        let yaml = "Developer:\n  model: sonnet\n  tools:\n    - Read\n";
+    fn roster_deduplicates_across_providers() {
+        let yaml = "agents:\n  claude:\n    Dev:\n      model: fast\n  gemini:\n    Dev:\n      model: fast\n";
+        let names = roster_names(yaml);
+        assert_eq!(names, vec!["Dev"]);
+    }
+
+    #[test]
+    fn config_block_flat() {
+        let yaml = "agents:\n  Developer:\n    model: sonnet\n    tools:\n      - Read\n";
         assert!(has_config_block(yaml, "Developer"));
         assert!(!has_config_block(yaml, "Missing"));
+    }
+
+    #[test]
+    fn config_block_nested() {
+        let yaml = "agents:\n  claude:\n    Developer:\n      model: sonnet\n      tools:\n        - Read\n";
+        assert!(has_config_block(yaml, "Developer"));
+        assert!(!has_config_block(yaml, "Missing"));
+    }
+
+    #[test]
+    fn skill_roles_flat() {
+        let yaml = "skills:\n  Review:\n    roles:\n      - Dev\n      - QA\n  Ops:\n    scope: workspace\n";
+        assert_eq!(skills_with_roles(yaml), vec!["Review"]);
+        assert_eq!(skill_roles(yaml, "Review"), vec!["Dev", "QA"]);
+    }
+
+    #[test]
+    fn skill_roles_nested() {
+        let yaml = "skills:\n  claude:\n    Review:\n      roles:\n        - Dev\n        - QA\n    Ops: {}\n";
+        assert_eq!(skills_with_roles(yaml), vec!["Review"]);
+        assert_eq!(skill_roles(yaml, "Review"), vec!["Dev", "QA"]);
     }
 
     #[test]
